@@ -22,7 +22,8 @@
     "lefthook": "2.1.14",
     "oxc-parser": "0.151.0",
     "oxfmt": "0.70.0",
-    "oxlint": "1.85.0"
+    "oxlint": "1.85.0",
+    "railway": "3.11.0"
   },
   "engines": {
     "node": ">=24"

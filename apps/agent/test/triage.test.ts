@@ -37,7 +37,10 @@ describe('triageAdvisory', () => {
       fixStrategy: 'Reject __proto__, constructor and prototype path segments.'
     }
 
-    await expect(triageAdvisory(modelReturning(expected), advisory)).resolves.toEqual(expected)
+    await expect(triageAdvisory(modelReturning(expected), advisory)).resolves.toEqual({
+      triage: expected,
+      usage: { inputTokens: expect.any(Number), outputTokens: expect.any(Number) }
+    })
   })
 
   it('wraps the advisory as delimited untrusted input', async () => {

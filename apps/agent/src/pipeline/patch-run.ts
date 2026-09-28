@@ -80,6 +80,11 @@ export function runId(ghsaId: string, packageName: string): string {
   return `${ghsaId}:${packageName}`
 }
 
+export function ghsaIdOf(id: string): string {
+  const separator = id.indexOf(':')
+  return separator === -1 ? id : id.slice(0, separator)
+}
+
 export function newPatchRun(advisory: Advisory, at: Date): PatchRun {
   return {
     id: runId(advisory.ghsaId, advisory.packageName),

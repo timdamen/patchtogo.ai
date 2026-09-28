@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+  - docs
+
+# pnpm does not run dependency lifecycle scripts unless they are allowed here.
+# true  = needs its install script (native module, or lefthook placing its binary)
+# false = ships prebuilt binaries via optional deps, install script not needed
+allowBuilds:
+  esbuild: true
+  lefthook: true
+
+# Supply-chain guard: only install versions that have been public for at least a day (pnpm 12 default, made explicit).
+minimumReleaseAge: 1440

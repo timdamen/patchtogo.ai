@@ -1,0 +1,28 @@
+pre-commit:
+  jobs:
+    - name: oxfmt
+      glob: '*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue,json,jsonc,css,md,yml,yaml}'
+      run: pnpm exec oxfmt {staged_files}
+      stage_fixed: true
+    - name: oxlint
+      glob: '*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue}'
+      run: pnpm exec oxlint {staged_files}
+    - name: comments
+      glob: '*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue}'
+      run: node scripts/check-comments.mjs {staged_files}
+    - name: typecheck
+      glob: '*.{ts,mts,cts,tsx,vue}'
+      run: pnpm typecheck
+    - name: test
+      glob: '*.{ts,mts,cts,tsx,vue}'
+      run: pnpm test
+
+commit-msg:
+  jobs:
+    - name: commit-message
+      run: node scripts/check-commit-message.mjs {1}
+
+pre-push:
+  jobs:
+    - name: knip
+      run: pnpm exec knip

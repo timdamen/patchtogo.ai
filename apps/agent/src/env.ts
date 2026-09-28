@@ -1,0 +1,13 @@
+import { z } from 'zod'
+
+export const aiEnvSchema = z.object({
+  ANTHROPIC_API_KEY: z.string().min(1),
+  PTG_MODEL: z.string().min(1).default('claude-opus-5-5')
+})
+
+export const serverEnvSchema = z.object({
+  PORT: z.coerce.number().int().positive().default(3000),
+  GITHUB_WEBHOOK_SECRET: z.string().min(1)
+})
+
+export type AiEnv = z.infer<typeof aiEnvSchema>

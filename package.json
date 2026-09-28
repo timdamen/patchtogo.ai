@@ -1,0 +1,31 @@
+{
+  "name": "patchtogo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter agent dev",
+    "docs:dev": "pnpm --filter docs dev",
+    "docs:build": "pnpm --filter docs build",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "knip": "knip",
+    "check:comments": "node scripts/check-comments.mjs",
+    "prepare": "[ -n \"$CI\" ] || lefthook install"
+  },
+  "devDependencies": {
+    "knip": "6.38.0",
+    "lefthook": "2.1.14",
+    "oxc-parser": "0.151.0",
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.6.0"
+}

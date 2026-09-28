@@ -8,3 +8,4 @@ dist
 .vercel
 .vitepress/cache
 .vitepress/dist
+.scratch

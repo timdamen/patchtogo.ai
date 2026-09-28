@@ -8,7 +8,7 @@ See [patchtogo.ai](https://patchtogo.ai) for how it works.
 
 ## Development
 
-Requires Node 24 and pnpm 12.
+Requires Node 24, pnpm 12 and, for the agent server, a Postgres database (`DATABASE_URL` in `apps/agent/.env`).
 
 ```sh
 pnpm install

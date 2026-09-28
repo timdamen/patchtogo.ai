@@ -6,7 +6,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 
 ## Layout
 
-- `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks. The Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) handles single-call triage; the fix itself will run on the Claude Agent SDK (the Claude Code engine, with custom subagents) inside a sandbox, per `.scratch/patch-pipeline/spec.md`. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`). It deploys to Railway (`apps/agent/railway.json`).
+- `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks. The Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) handles single-call triage; the fix itself will run on the Claude Agent SDK (the Claude Code engine, with custom subagents) inside a sandbox, per `.scratch/patch-pipeline/spec.md`. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`) and needs a Postgres `DATABASE_URL`: patch runs, their events and costs, run-token revocations and the poll cursor live there, and pipeline events go through a pg-boss queue (`src/queue.ts`) that caps concurrent runs at `PTG_MAX_CONCURRENT_RUNS`. SQL migrations in `apps/agent/migrations/` run on start, before the server listens. Tests run the Postgres adapters on PGlite (in-process, no Docker). It deploys to Railway with a Postgres service, configured as code in `.railway/railway.ts` (`railway config plan` previews, `railway config apply` applies; secrets stay `preserve()`, so every new variable must be listed there or an apply deletes it).
 - `apps/docs/`: the VitePress site, deployed to the Vercel project `focusring/patchtogo` (root directory `apps/docs`, output `.vitepress/dist`, clean URLs from `apps/docs/vercel.json`). Pushes to `main` deploy to production.
 - `packages/`: shared libraries. Empty for now; the workspace glob already includes it.
 - `scripts/`: the checks the git hooks run.
@@ -15,6 +15,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 
 - `pnpm dev`: the agent server with watch mode.
 - `pnpm --filter agent triage <GHSA-id> [package]`: triage a real advisory with the configured model.
+- `pnpm --filter agent retry [<GHSA-id>[:<package>]]`: without an argument, list failed runs and advisories whose queue job failed; with one, retry them from their failed step. In production: `railway ssh -s agent -- node apps/agent/src/retry-cli.ts <id>`.
 - `pnpm docs:dev`, `pnpm docs:build`: the docs site.
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every workspace package.
 - `pnpm lint`, `pnpm fmt`, `pnpm fmt:check`, `pnpm knip`, `pnpm check:comments`: the quality checks, repo-wide.

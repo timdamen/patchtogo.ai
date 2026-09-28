@@ -1,12 +1,29 @@
 import type { PatchRun } from './patch-run.ts'
-import { StaleRunError, type RunFilter, type Store } from './ports.ts'
+import { StaleRunError, type RunCost, type RunEvent, type RunFilter, type Store } from './ports.ts'
+
+function eventOf(run: PatchRun): RunEvent {
+  return {
+    runId: run.id,
+    version: run.version,
+    state: run.state,
+    reason: run.reason,
+    failure: run.failure,
+    at: run.updatedAt
+  }
+}
 
 export class InMemoryStore implements Store {
   #runs = new Map<string, PatchRun>()
+  #events: RunEvent[] = []
+  #costs: RunCost[] = []
 
   createRunIfAbsent(run: PatchRun): Promise<PatchRun> {
-    const stored = this.#runs.get(run.id) ?? structuredClone(run)
-    this.#runs.set(run.id, stored)
+    let stored = this.#runs.get(run.id)
+    if (!stored) {
+      stored = structuredClone(run)
+      this.#runs.set(run.id, stored)
+      this.#events.push(structuredClone(eventOf(stored)))
+    }
     return Promise.resolve(structuredClone(stored))
   }
 
@@ -17,7 +34,9 @@ export class InMemoryStore implements Store {
 
   listRuns(filter: RunFilter = {}): Promise<PatchRun[]> {
     const runs = [...this.#runs.values()].filter(
-      (run) => filter.ghsaId === undefined || run.ghsaId === filter.ghsaId
+      (run) =>
+        (filter.ghsaId === undefined || run.ghsaId === filter.ghsaId) &&
+        (filter.state === undefined || run.state === filter.state)
     )
     return Promise.resolve(runs.map((run) => structuredClone(run)))
   }
@@ -30,6 +49,27 @@ export class InMemoryStore implements Store {
       )
     }
     this.#runs.set(run.id, structuredClone(run))
+    this.#events.push(structuredClone(eventOf(run)))
     return Promise.resolve()
+  }
+
+  listEvents(runId: string): Promise<RunEvent[]> {
+    return Promise.resolve(
+      this.#events.filter((event) => event.runId === runId).map((event) => structuredClone(event))
+    )
+  }
+
+  recordCost(cost: RunCost): Promise<void> {
+    if (!this.#runs.has(cost.runId)) {
+      return Promise.reject(new Error(`no patch run ${cost.runId}`))
+    }
+    this.#costs.push(structuredClone(cost))
+    return Promise.resolve()
+  }
+
+  listCosts(runId: string): Promise<RunCost[]> {
+    return Promise.resolve(
+      this.#costs.filter((cost) => cost.runId === runId).map((cost) => structuredClone(cost))
+    )
   }
 }

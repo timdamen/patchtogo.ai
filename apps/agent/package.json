@@ -6,6 +6,7 @@
     "dev": "node --watch --env-file-if-exists=.env src/main.ts",
     "start": "node src/main.ts",
     "triage": "node --env-file-if-exists=.env src/triage-cli.ts",
+    "retry": "node --env-file-if-exists=.env src/retry-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -15,10 +16,14 @@
     "@octokit/webhooks": "^14.2.0",
     "ai": "^7.0.118",
     "hono": "^4.13.9",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.35.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^24.19.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"

@@ -28,7 +28,17 @@ export function createPipeline(ports: Ports): Pipeline {
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
-      const triage = await triageAdvisory(model, run.advisory)
+      const { triage, usage } = await triageAdvisory(model, run.advisory)
+      if (usage) {
+        await store.recordCost({
+          runId: run.id,
+          step: run.state,
+          ...usage,
+          costUsd: null,
+          sandboxSeconds: 0,
+          at: clock.now()
+        })
+      }
       return { to: 'triaged', reason: triage.reason, details: { triage } }
     },
     async triaged(run) {

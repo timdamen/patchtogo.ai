@@ -1,7 +1,7 @@
 import type { LanguageModel } from 'ai'
 import type { Advisory, SecurityAdvisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
-import type { PatchRun } from './patch-run.ts'
+import type { PatchRun, RunFailure, RunState } from './patch-run.ts'
 
 export interface GitHub {
   getAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
@@ -35,6 +35,26 @@ export interface Fixer {
 
 export interface RunFilter {
   ghsaId?: string
+  state?: RunState
+}
+
+export interface RunEvent {
+  runId: string
+  version: number
+  state: RunState
+  reason: string | null
+  failure: RunFailure | null
+  at: Date
+}
+
+export interface RunCost {
+  runId: string
+  step: RunState
+  inputTokens: number
+  outputTokens: number
+  costUsd: number | null
+  sandboxSeconds: number
+  at: Date
 }
 
 export interface Store {
@@ -42,6 +62,9 @@ export interface Store {
   getRun(id: string): Promise<PatchRun | undefined>
   listRuns(filter?: RunFilter): Promise<PatchRun[]>
   saveRun(run: PatchRun): Promise<void>
+  listEvents(runId: string): Promise<RunEvent[]>
+  recordCost(cost: RunCost): Promise<void>
+  listCosts(runId: string): Promise<RunCost[]>
 }
 
 export class StaleRunError extends Error {

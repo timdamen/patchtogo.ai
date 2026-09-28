@@ -6,6 +6,7 @@ import { PostgresStore } from '../src/postgres/store.ts'
 import { createPipelineQueue, type PipelineQueueOptions } from '../src/queue.ts'
 import type { Triage } from '../src/triage.ts'
 import { createTestPipeline } from './fakes/pipeline.ts'
+import { seedUpstream } from './fakes/upstream.ts'
 import { freshDatabase } from './support/stores.ts'
 
 const waitLong = { timeout: 15_000, interval: 50 }
@@ -139,13 +140,14 @@ describe('operator retry', { timeout: 30_000 }, () => {
   it('resumes a failed run from its failed step through the queue', async () => {
     const { queue, db } = await startQueue()
     let modelDown = true
-    const { pipeline, github, store } = createTestPipeline({
+    const { pipeline, github, registry, store } = createTestPipeline({
       store: new PostgresStore(db),
       triage: () => {
         if (modelDown) throw new Error('model unavailable')
         return patch
       }
     })
+    seedUpstream(github, registry, { name: 'lodash.set', version: '4.3.2' })
     github.publishAdvisory({
       ghsaId: 'GHSA-p6mc-m468-83gw',
       cveId: null,
@@ -174,7 +176,7 @@ describe('operator retry', { timeout: 30_000 }, () => {
 
     await vi.waitFor(
       async () =>
-        expect(await store.getRun(runId)).toMatchObject({ state: 'forking', triage: patch }),
+        expect(await store.getRun(runId)).toMatchObject({ state: 'fixing', triage: patch }),
       waitLong
     )
   })

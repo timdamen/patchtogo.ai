@@ -29,6 +29,6 @@ patchtogo watches the GitHub Advisory Database for npm advisories that have no p
 
 Every commit on the patch PR is published right away as a preview release through [pkg.pr.new](https://pkg.pr.new). Previews are clearly labelled as **unreviewed** and serve as an emergency stopgap.
 
-A named reviewer team reviews the patch PR. The agent iterates on their comments, and only on their comments. After two reviewer approvals a human merges. The merge publishes a stable release, `@patchtogo/<package>`, from GitHub Actions with npm provenance, so anyone can trace the tarball back to the exact commit.
+A named reviewer team reviews the patch PR. The agent iterates on their comments, and only on their comments. After two reviewer approvals a human merges. The merge publishes a stable release, `@patchtogo.ai/<package>`, from GitHub Actions with npm provenance, so anyone can trace the tarball back to the exact commit.
 
 Consumers adopt a patch by pointing the vulnerable dependency at the patched package with their package manager's overrides. See [How it works](/how-it-works#using-a-patched-package) for an example.

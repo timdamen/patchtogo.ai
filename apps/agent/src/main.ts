@@ -3,10 +3,20 @@ import { serve } from '@hono/node-server'
 import { Webhooks } from '@octokit/webhooks'
 import { createAdvisoryPoller } from './advisory-poller.ts'
 import { forwardSecurityAdvisories } from './advisory-webhook.ts'
-import { aiEnvSchema, serverEnvSchema } from './env.ts'
-import { fetchGlobalAdvisory, npmAdvisoriesUpdatedSince } from './github-advisories.ts'
+import { createSandboxBuilder } from './builder/sandbox-builder.ts'
+import {
+  aiEnvSchema,
+  fixerEnvSchema,
+  githubAppEnvSchema,
+  pipelineEnvSchema,
+  serverEnvSchema
+} from './env.ts'
+import { fixerSettings } from './fixer/config.ts'
+import { npmAdvisoriesUpdatedSince } from './github-advisories.ts'
+import { createGitHubApp, installationOctokit } from './github-app.ts'
 import { createModel } from './model.ts'
 import { createModelProxy } from './model-proxy.ts'
+import { createNpmRegistry } from './npm-registry.ts'
 import { consoleNotifier, createDiscordNotifier } from './notifier.ts'
 import { IllegalTransitionError } from './pipeline/patch-run.ts'
 import { createPipeline } from './pipeline/pipeline.ts'
@@ -20,7 +30,11 @@ import { createServer } from './server.ts'
 
 const env = serverEnvSchema.parse(process.env)
 const aiEnv = aiEnvSchema.parse(process.env)
+const pipelineEnv = pipelineEnvSchema.parse(process.env)
 const githubApi = { token: env.GITHUB_TOKEN }
+const github = createGitHubApp(
+  await installationOctokit(githubAppEnvSchema.parse(process.env), pipelineEnv.PTG_FORK_ORG)
+)
 
 const postgres = await openPostgres(env.DATABASE_URL, { maintenance: true })
 const queue = await createPipelineQueue(postgres.boss, {
@@ -38,16 +52,28 @@ const modelProxy = createModelProxy({
   workspaceId: aiEnv.ANTHROPIC_WORKSPACE_ID
 })
 
-const pipeline = createPipeline({
-  github: { getAdvisory: (ghsaId) => fetchGlobalAdvisory(ghsaId, githubApi) },
-  fixer: { fix: () => Promise.reject(new Error('no fixer is configured yet')) },
-  model: createModel(aiEnv),
-  store: new PostgresStore(postgres.db),
-  notifier: env.DISCORD_WEBHOOK_URL
-    ? createDiscordNotifier({ webhookUrl: env.DISCORD_WEBHOOK_URL })
-    : consoleNotifier,
-  clock: { now: () => new Date() }
-})
+const pipeline = createPipeline(
+  {
+    github,
+    registry: createNpmRegistry(),
+    builder: createSandboxBuilder({
+      credentials: fixerSettings(fixerEnvSchema.parse(process.env)).credentials,
+      sourceArchive: github.sourceArchive
+    }),
+    fixer: { fix: () => Promise.reject(new Error('no fixer is configured yet')) },
+    model: createModel(aiEnv),
+    store: new PostgresStore(postgres.db),
+    notifier: env.DISCORD_WEBHOOK_URL
+      ? createDiscordNotifier({ webhookUrl: env.DISCORD_WEBHOOK_URL })
+      : consoleNotifier,
+    clock: { now: () => new Date() }
+  },
+  {
+    forkOrg: pipelineEnv.PTG_FORK_ORG,
+    npmScope: pipelineEnv.PTG_NPM_SCOPE,
+    reviewerTeam: pipelineEnv.PTG_REVIEWER_TEAM
+  }
+)
 
 await queue.work(async (event) => {
   try {

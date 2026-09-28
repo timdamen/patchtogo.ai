@@ -1,12 +1,14 @@
 import { npmAdvisories } from '../advisory.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
 import type { PipelineEvent } from './events.ts'
+import { forkingSteps, type ForkSettings } from './forking.ts'
 import {
   newPatchRun,
   retry,
   transition,
   type PatchRun,
   type RunState,
+  type Step,
   type Transition
 } from './patch-run.ts'
 import { StaleRunError, type Ports } from './ports.ts'
@@ -15,7 +17,7 @@ export interface Pipeline {
   handle(event: PipelineEvent): Promise<void>
 }
 
-type Step = (run: PatchRun) => Promise<Transition | undefined>
+export type PipelineSettings = ForkSettings
 
 const triageOutcomes = {
   patch: 'forking',
@@ -23,7 +25,7 @@ const triageOutcomes = {
   'needs-human': 'needs-human'
 } as const satisfies Record<Triage['decision'], RunState>
 
-export function createPipeline(ports: Ports): Pipeline {
+export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
   const { github, model, store, notifier, clock } = ports
 
   const steps: Partial<Record<RunState, Step>> = {
@@ -44,7 +46,8 @@ export function createPipeline(ports: Ports): Pipeline {
     async triaged(run) {
       if (!run.triage) throw new Error(`patch run ${run.id} has no triage`)
       return { to: triageOutcomes[run.triage.decision], reason: run.triage.reason }
-    }
+    },
+    ...forkingSteps(ports, settings)
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {

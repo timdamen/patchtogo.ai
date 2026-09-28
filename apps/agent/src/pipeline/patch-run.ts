@@ -1,5 +1,6 @@
 import type { Advisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
+import type { RepoRef } from './ports.ts'
 
 export const runStates = [
   'detected',
@@ -24,7 +25,7 @@ const nextStates: Record<RunState, readonly RunState[]> = {
   triaged: ['skipped', 'needs-human', 'forking'],
   skipped: [],
   'needs-human': [],
-  forking: ['verifying'],
+  forking: ['verifying', 'needs-human'],
   verifying: ['fixing', 'needs-human'],
   fixing: ['in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],
@@ -44,8 +45,26 @@ export function canTransition(from: RunState, to: RunState): boolean {
   return nextStates[from].includes(to)
 }
 
+export interface UpstreamRelease {
+  version: string
+  repository: RepoRef
+  directory: string
+  commit: { sha: string; ref: string }
+  tarball: { url: string; integrity: string | null }
+  license: string | null
+  publishedAt: string | null
+}
+
+export interface BaseBranch {
+  name: string
+  sha: string
+}
+
 export interface RunDetails {
   triage: Triage | null
+  release?: UpstreamRelease
+  fork?: RepoRef
+  baseBranch?: BaseBranch
 }
 
 export interface RunFailure {
@@ -71,6 +90,8 @@ export interface Transition {
   reason?: string
   details?: Partial<RunDetails>
 }
+
+export type Step = (run: PatchRun) => Promise<Transition | undefined>
 
 export class IllegalTransitionError extends Error {
   override name = 'IllegalTransitionError'

@@ -13,7 +13,7 @@ import {
 const specTable: Record<string, RunState[]> = {
   detected: ['triaged'],
   triaged: ['skipped', 'needs-human', 'forking'],
-  forking: ['verifying'],
+  forking: ['verifying', 'needs-human'],
   verifying: ['fixing', 'needs-human'],
   fixing: ['in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],

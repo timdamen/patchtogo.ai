@@ -27,6 +27,30 @@ export const serverEnvSchema = databaseEnvSchema.extend({
   PTG_JOB_TIMEOUT_MINUTES: z.coerce.number().positive().default(60)
 })
 
+export const pipelineEnvSchema = z.object({
+  PTG_FORK_ORG: z.string().min(1).default('patchtogo-ai'),
+  PTG_NPM_SCOPE: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._-]*$/)
+    .default('patchtogo.ai'),
+  PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers')
+})
+
+export const githubAppEnvSchema = z
+  .object({
+    GITHUB_APP_ID: z.string().min(1),
+    GITHUB_APP_INSTALLATION_ID: optionalString.pipe(
+      z.coerce.number<string | undefined>().int().positive().optional()
+    ),
+    GITHUB_APP_PRIVATE_KEY: optionalString,
+    GITHUB_APP_PRIVATE_KEY_PATH: optionalString
+  })
+  .refine(
+    (env) =>
+      env.GITHUB_APP_PRIVATE_KEY !== undefined || env.GITHUB_APP_PRIVATE_KEY_PATH !== undefined,
+    'set GITHUB_APP_PRIVATE_KEY (the PEM contents) or GITHUB_APP_PRIVATE_KEY_PATH'
+  )
+
 const optionalModel = z.string().min(1).optional()
 
 export const fixerEnvSchema = z
@@ -57,3 +81,5 @@ export const fixerEnvSchema = z
 export type AiEnv = z.infer<typeof aiEnvSchema>
 
 export type FixerEnv = z.infer<typeof fixerEnvSchema>
+
+export type GitHubAppEnv = z.infer<typeof githubAppEnvSchema>

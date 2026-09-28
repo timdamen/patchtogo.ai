@@ -5,12 +5,18 @@ import {
   type RunnerResult,
   type TestRun
 } from '@patchtogo/fixer-runner/protocol'
-import { Sandbox, type NetworkPolicy } from '@vercel/sandbox'
+import type { NetworkPolicy, Sandbox } from '@vercel/sandbox'
 import type { FixRequest, FixResult, Fixer, ModelSpend, TestResult } from '../pipeline/ports.ts'
+import {
+  check,
+  NPM_REGISTRY,
+  openSandbox,
+  type SandboxCredentials,
+  type SourceArchive
+} from '../sandbox.ts'
 import { lineSplitter, parseRunnerLine, type RunnerLine } from './runner-lines.ts'
 import { runnerPackage } from './runner-package.ts'
 
-const NPM_REGISTRY = 'registry.npmjs.org'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export const sandboxLayout = {
@@ -49,12 +55,6 @@ export const runnerCommand = {
   ]
 }
 
-export interface SandboxCredentials {
-  teamId: string
-  projectId: string
-  token: string
-}
-
 export interface ModelGrant {
   token: string
   revoke(): Promise<void>
@@ -64,8 +64,6 @@ export interface ModelAccess {
   baseUrl: string
   grant(runId: string, ttlMs: number): Promise<ModelGrant>
 }
-
-export type SourceArchive = (source: FixRequest['source']) => Promise<Uint8Array>
 
 export interface FixerLimits {
   maxTurns: number
@@ -176,14 +174,6 @@ export function fixResult(
     summary,
     cost: { ...spent(totals, before), sandboxSeconds },
     session
-  }
-}
-
-async function check(sandbox: Sandbox, what: string, cmd: string, args: string[], cwd?: string) {
-  const done = await sandbox.runCommand({ cmd, args, cwd })
-  if (done.exitCode !== 0) {
-    const output = (await done.output('both')).slice(-4000)
-    throw new Error(`${what} failed in the sandbox (exit ${done.exitCode}):\n${output}`)
   }
 }
 
@@ -303,13 +293,12 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
       try {
         const input = runnerInput(request, { ...options, proxyBaseUrl: modelAccess.baseUrl })
         const created = now().getTime()
-        sandbox = await Sandbox.create({
-          ...credentials,
-          persistent: false,
-          timeout: limits.sandboxTimeoutMs,
-          resources: { vcpus: options.vcpus ?? 2 },
+        sandbox = await openSandbox({
+          credentials,
+          timeoutMs: limits.sandboxTimeoutMs,
+          vcpus: options.vcpus,
           networkPolicy: 'allow-all',
-          tags: { app: 'patchtogo', purpose: 'fixer' }
+          purpose: 'fixer'
         })
         await provision(sandbox)
         await sandbox.update({ networkPolicy: egressPolicy(modelAccess.baseUrl) })

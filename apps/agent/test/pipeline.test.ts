@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SecurityAdvisory, Vulnerability } from '../src/advisory.ts'
 import type { Triage } from '../src/triage.ts'
 import { createTestPipeline } from './fakes/pipeline.ts'
+import { seedUpstream } from './fakes/upstream.ts'
 import { stores } from './support/stores.ts'
 
 const ghsaId = 'GHSA-p6mc-m468-83gw'
@@ -37,20 +38,29 @@ const needsHuman: Triage = {
 
 const published = { type: 'advisory-published', ghsaId } as const
 
+type TestPipeline = ReturnType<typeof createTestPipeline>
+
+function seedLodashSet({ github, registry }: TestPipeline) {
+  seedUpstream(github, registry, {
+    name: 'lodash.set',
+    version: '4.3.2',
+    repository: { owner: 'lodash', repo: 'lodash.set' }
+  })
+}
+
 describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
   describe('advisory published', () => {
-    it('triages a package without a patched version and leaves the run ready for forking', async () => {
-      const { pipeline, github, store, notifier } = createTestPipeline({
-        store: await createStore(),
-        triage: () => patch
-      })
+    it('triages a package without a patched version and takes it on to fixing', async () => {
+      const test = createTestPipeline({ store: await createStore(), triage: () => patch })
+      const { pipeline, github, store, notifier } = test
+      seedLodashSet(test)
       github.publishAdvisory(advisory(npmPackage('lodash.set')))
 
       await pipeline.handle(published)
 
       const runs = await store.listRuns({ ghsaId })
       expect(runs).toHaveLength(1)
-      expect(runs[0]).toMatchObject({ packageName: 'lodash.set', state: 'forking', triage: patch })
+      expect(runs[0]).toMatchObject({ packageName: 'lodash.set', state: 'fixing', triage: patch })
       expect(notifier.notifications).toEqual([])
     })
 
@@ -66,10 +76,12 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
     })
 
     it('creates one run per npm package and ignores other ecosystems', async () => {
-      const { pipeline, github, store } = createTestPipeline({
+      const test = createTestPipeline({
         store: await createStore(),
         triage: (a) => (a.packageName === 'lodash.set' ? patch : needsHuman)
       })
+      const { pipeline, github, store } = test
+      seedLodashSet(test)
       github.publishAdvisory(
         advisory(
           npmPackage('lodash', '4.17.19'),
@@ -89,7 +101,7 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
       const runs = await store.listRuns({ ghsaId })
       expect(Object.fromEntries(runs.map((r) => [r.packageName, r.state]))).toEqual({
         lodash: 'skipped',
-        'lodash.set': 'forking',
+        'lodash.set': 'fixing',
         'lodash.setwith': 'needs-human'
       })
     })
@@ -117,10 +129,12 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
     })
 
     it('treats a replayed advisory as a no-op', async () => {
-      const { pipeline, github, store, model, notifier } = createTestPipeline({
+      const test = createTestPipeline({
         store: await createStore(),
         triage: (a) => (a.packageName === 'lodash.set' ? patch : needsHuman)
       })
+      const { pipeline, github, store, model, notifier } = test
+      seedLodashSet(test)
       github.publishAdvisory(advisory(npmPackage('lodash.set'), npmPackage('lodash.setwith')))
 
       await pipeline.handle(published)
@@ -153,13 +167,15 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
   describe('failures and retries', () => {
     it('records the failed step and resumes from it on retry', async () => {
       let modelDown = true
-      const { pipeline, github, store, clock } = createTestPipeline({
+      const test = createTestPipeline({
         store: await createStore(),
         triage: () => {
           if (modelDown) throw new Error('model unavailable')
           return patch
         }
       })
+      const { pipeline, github, store, clock } = test
+      seedLodashSet(test)
       github.publishAdvisory(advisory(npmPackage('lodash.set')))
 
       await pipeline.handle(published)
@@ -174,7 +190,7 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
       await pipeline.handle({ type: 'retry-requested', runId: failed?.id ?? '' })
 
       const retried = await store.getRun(failed?.id ?? '')
-      expect(retried).toMatchObject({ state: 'forking', failure: null, triage: patch })
+      expect(retried).toMatchObject({ state: 'fixing', failure: null, triage: patch })
       expect(retried?.updatedAt).toEqual(clock.now())
     })
 
@@ -197,13 +213,15 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
   describe('audit trail', () => {
     it('records every state the run passed through, including a failure and its retry', async () => {
       let modelDown = true
-      const { pipeline, github, store, clock } = createTestPipeline({
+      const test = createTestPipeline({
         store: await createStore(),
         triage: () => {
           if (modelDown) throw new Error('model unavailable')
           return patch
         }
       })
+      const { pipeline, github, store, clock } = test
+      seedLodashSet(test)
       github.publishAdvisory(advisory(npmPackage('lodash.set')))
       await pipeline.handle(published)
       const [run] = await store.listRuns({ ghsaId })
@@ -217,17 +235,18 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
         [1, 'failed'],
         [2, 'detected'],
         [3, 'triaged'],
-        [4, 'forking']
+        [4, 'forking'],
+        [5, 'verifying'],
+        [6, 'fixing']
       ])
       expect(events[1]?.failure).toMatchObject({ step: 'detected' })
       expect(events.at(-1)?.at).toEqual(clock.now())
     })
 
     it('records the token cost of each triage call against its run', async () => {
-      const { pipeline, github, store, clock } = createTestPipeline({
-        store: await createStore(),
-        triage: () => patch
-      })
+      const test = createTestPipeline({ store: await createStore(), triage: () => patch })
+      const { pipeline, github, store, clock } = test
+      seedLodashSet(test)
       github.publishAdvisory(advisory(npmPackage('lodash.set'), npmPackage('lodash', '4.17.19')))
 
       await pipeline.handle(published)
@@ -241,6 +260,15 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
           outputTokens: 20,
           costUsd: null,
           sandboxSeconds: 0,
+          at: clock.now()
+        },
+        {
+          runId: triaged?.id,
+          step: 'verifying',
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: null,
+          sandboxSeconds: 42,
           at: clock.now()
         }
       ])

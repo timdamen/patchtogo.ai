@@ -1,0 +1,180 @@
+import { Octokit } from '@octokit/rest'
+import { describe, expect, it } from 'vitest'
+import { createGitHubApp } from '../src/github-app.ts'
+
+interface Call {
+  method: string
+  path: string
+  body: unknown
+}
+
+type Route = (call: Call) => { status: number; body?: unknown } | undefined
+
+const sha = (char: string) => char.repeat(40)
+
+function fakeGitHub(...routes: Route[]) {
+  const calls: Call[] = []
+  const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+    const call = {
+      method: init?.method ?? 'GET',
+      path: decodeURIComponent(url.pathname),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined
+    }
+    calls.push(call)
+    for (const route of routes) {
+      const response = route(call)
+      if (!response) continue
+      const text =
+        typeof response.body === 'string' ? response.body : JSON.stringify(response.body ?? {})
+      return new Response(response.status === 204 ? null : text, {
+        status: response.status,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 })
+  }
+  const github = createGitHubApp(new Octokit({ request: { fetch, retries: 0 } }), {
+    pollIntervalMs: 1,
+    forkReadyTimeoutMs: 1000
+  })
+  return { github, calls }
+}
+
+function on(method: string, path: string, status: number, body?: unknown): Route {
+  return (call) => (call.method === method && call.path === path ? { status, body } : undefined)
+}
+
+const upstream = { owner: 'component', repo: 'escape-html' }
+const into = { owner: 'patchtogo-ai', repo: 'escape-html' }
+const forkData = {
+  name: 'escape-html',
+  owner: { login: 'patchtogo-ai' },
+  fork: true,
+  default_branch: 'master',
+  parent: { full_name: 'component/escape-html' },
+  source: { full_name: 'component/escape-html' }
+}
+
+describe('GitHub App adapter', () => {
+  it('reuses an existing fork of the upstream repository', async () => {
+    const { github, calls } = fakeGitHub(
+      on('GET', '/repos/patchtogo-ai/escape-html', 200, forkData),
+      on('GET', '/repos/patchtogo-ai/escape-html/commits/master', 200, sha('a'))
+    )
+
+    expect(await github.forkRepository(upstream, into)).toEqual(into)
+    expect(calls.map((c) => c.method)).not.toContain('POST')
+  })
+
+  it('forks into the organisation and waits until the fork has its commits', async () => {
+    let polls = 0
+    const { github, calls } = fakeGitHub(
+      on('POST', '/repos/component/escape-html/forks', 202, forkData),
+      (call) =>
+        call.path === '/repos/patchtogo-ai/escape-html/commits/master'
+          ? ++polls < 3
+            ? { status: 409, body: { message: 'Git Repository is empty.' } }
+            : { status: 200, body: sha('a') }
+          : undefined
+    )
+
+    expect(await github.forkRepository(upstream, into)).toEqual(into)
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      organization: 'patchtogo-ai',
+      name: 'escape-html',
+      default_branch_only: false
+    })
+    expect(polls).toBe(3)
+  })
+
+  it('refuses a repository with the fork name that is not a fork of the upstream', async () => {
+    const { github } = fakeGitHub(
+      on('GET', '/repos/patchtogo-ai/escape-html', 200, { ...forkData, fork: false })
+    )
+
+    await expect(github.forkRepository(upstream, into)).rejects.toThrow(
+      'patchtogo-ai/escape-html exists and is not a fork of component/escape-html'
+    )
+  })
+
+  it('resolves release refs to commits and treats unknown refs as missing', async () => {
+    const { github } = fakeGitHub(
+      on('GET', '/repos/component/escape-html/commits/v1.0.3', 200, sha('b')),
+      on('GET', '/repos/component/escape-html/commits/1.0.3', 422, { message: 'No commit found' })
+    )
+
+    expect(await github.findCommit(upstream, 'v1.0.3')).toBe(sha('b'))
+    expect(await github.findCommit(upstream, '1.0.3')).toBeUndefined()
+    expect(await github.findCommit(upstream, 'escape-html@1.0.3')).toBeUndefined()
+  })
+
+  it('commits every change in one commit and creates the branch with a single ref', async () => {
+    const { github, calls } = fakeGitHub(
+      on('GET', `/repos/patchtogo-ai/escape-html/git/commits/${sha('a')}`, 200, {
+        sha: sha('a'),
+        tree: { sha: sha('t') }
+      }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/trees', 201, { sha: sha('u') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/commits', 201, { sha: sha('c') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/refs', 201, {})
+    )
+
+    const head = await github.createBranch(into, {
+      name: 'ptg/base/escape-html/1.0.3',
+      parent: sha('a'),
+      message: 'chore: patchtogo scaffolding',
+      changes: [
+        { path: 'package.json', content: '{}\n' },
+        { path: '.github/workflows/ci.yml', delete: true }
+      ]
+    })
+
+    expect(head).toBe(sha('c'))
+    expect(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body])).toEqual([
+      [
+        '/repos/patchtogo-ai/escape-html/git/trees',
+        {
+          base_tree: sha('t'),
+          tree: [
+            { path: 'package.json', mode: '100644', type: 'blob', content: '{}\n' },
+            { path: '.github/workflows/ci.yml', mode: '100644', type: 'blob', sha: null }
+          ]
+        }
+      ],
+      [
+        '/repos/patchtogo-ai/escape-html/git/commits',
+        { message: 'chore: patchtogo scaffolding', tree: sha('u'), parents: [sha('a')] }
+      ],
+      [
+        '/repos/patchtogo-ai/escape-html/git/refs',
+        { ref: 'refs/heads/ptg/base/escape-html/1.0.3', sha: sha('c') }
+      ]
+    ])
+  })
+
+  it('returns the existing branch head when another attempt created the branch first', async () => {
+    const { github } = fakeGitHub(
+      on('GET', `/repos/patchtogo-ai/escape-html/git/commits/${sha('a')}`, 200, {
+        tree: { sha: sha('t') }
+      }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/trees', 201, { sha: sha('u') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/commits', 201, { sha: sha('c') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/refs', 422, {
+        message: 'Reference already exists'
+      }),
+      on('GET', '/repos/patchtogo-ai/escape-html/git/ref/heads/ptg/base/escape-html/1.0.3', 200, {
+        object: { sha: sha('d') }
+      })
+    )
+
+    const head = await github.createBranch(into, {
+      name: 'ptg/base/escape-html/1.0.3',
+      parent: sha('a'),
+      message: 'm',
+      changes: []
+    })
+
+    expect(head).toBe(sha('d'))
+  })
+})

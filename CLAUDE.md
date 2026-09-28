@@ -6,7 +6,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 
 ## Layout
 
-- `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks, and the Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) drives triage and patching. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`). It deploys to Railway (`apps/agent/railway.json`).
+- `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks. The Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) handles single-call triage; the fix itself will run on the Claude Agent SDK (the Claude Code engine, with custom subagents) inside a sandbox, per `.scratch/patch-pipeline/spec.md`. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`). It deploys to Railway (`apps/agent/railway.json`).
 - `apps/docs/`: the VitePress site, deployed to the Vercel project `focusring/patchtogo` (root directory `apps/docs`, output `.vitepress/dist`, clean URLs from `apps/docs/vercel.json`). Pushes to `main` deploy to production.
 - `packages/`: shared libraries. Empty for now; the workspace glob already includes it.
 - `scripts/`: the checks the git hooks run.

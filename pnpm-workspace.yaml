@@ -1,7 +1,6 @@
 packages:
   - apps/*
   - packages/*
-  - docs
 
 # pnpm does not run dependency lifecycle scripts unless they are allowed here.
 # true  = needs its install script (native module, or lefthook placing its binary)

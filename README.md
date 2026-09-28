@@ -16,7 +16,7 @@ pnpm dev
 pnpm docs:dev
 ```
 
-`apps/agent` is the Node service (GitHub webhooks and the AI patching agent). `docs` is the VitePress site.
+`apps/agent` is the Node service (GitHub webhooks and the AI patching agent). `apps/docs` is the VitePress site.
 
 ## License
 

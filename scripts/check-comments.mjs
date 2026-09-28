@@ -75,7 +75,7 @@ for (const file of files) {
 
 if (offending > 0) {
   console.error(
-    `\n${offending} comment(s) found. Code explains itself; move the why into docs/ or a commit message.`
+    `\n${offending} comment(s) found. Code explains itself; move the why into apps/docs/ or a commit message.`
   )
   process.exit(1)
 }

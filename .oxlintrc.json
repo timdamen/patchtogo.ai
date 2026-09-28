@@ -14,8 +14,8 @@
     "**/node_modules/",
     "**/dist/",
     "**/build/",
-    "docs/.vitepress/cache/",
-    "docs/.vitepress/dist/"
+    "**/.vitepress/cache/",
+    "**/.vitepress/dist/"
   ],
   "rules": {}
 }

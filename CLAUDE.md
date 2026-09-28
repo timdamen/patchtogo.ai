@@ -7,7 +7,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 ## Layout
 
 - `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks, and the Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) drives triage and patching. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`). It deploys to Railway (`apps/agent/railway.json`).
-- `docs/`: the VitePress site, deployed to the Vercel project `focusring/patchtogo` (root directory `docs`, output `.vitepress/dist`). Pushes to `main` deploy to production.
+- `apps/docs/`: the VitePress site, deployed to the Vercel project `focusring/patchtogo` (root directory `apps/docs`, output `.vitepress/dist`, clean URLs from `apps/docs/vercel.json`). Pushes to `main` deploy to production.
 - `packages/`: shared libraries. Empty for now; the workspace glob already includes it.
 - `scripts/`: the checks the git hooks run.
 
@@ -27,7 +27,7 @@ Git hooks (`lefthook.yml`, installed by `pnpm install` through the root `prepare
 - **commit-msg**: Conventional Commits, `type(scope): subject`: lowercase subject, no trailing period, header at most 72 characters.
 - **pre-push**: `knip` for unused files, exports and dependencies.
 
-Code explains itself: `check:comments` rejects comments in JS and TS (tool directives excepted), so the why goes into `docs/` or the commit message; formatting is oxfmt's job.
+Code explains itself: `check:comments` rejects comments in JS and TS (tool directives excepted), so the why goes into `apps/docs/` or the commit message; formatting is oxfmt's job.
 
 ## Dependencies
 

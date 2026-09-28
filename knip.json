@@ -6,6 +6,6 @@
       "entry": ["lefthook.yml", "scripts/*.mjs"]
     },
     "apps/agent": {},
-    "docs": {}
+    "apps/docs": {}
   }
 }

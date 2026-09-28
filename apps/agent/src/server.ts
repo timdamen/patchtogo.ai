@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import type { Webhooks } from '@octokit/webhooks'
 
-export function createServer(webhooks: Webhooks) {
+export function createServer(webhooks: Webhooks, options: { modelProxy?: Hono } = {}) {
   const app = new Hono()
+
+  if (options.modelProxy) app.route('/model-proxy', options.modelProxy)
 
   app.get('/health', (c) => c.json({ ok: true }))
 

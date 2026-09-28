@@ -8,7 +8,8 @@ export const aiEnvSchema = z.object({
 
 export const serverEnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
-  GITHUB_WEBHOOK_SECRET: z.string().min(1)
+  GITHUB_WEBHOOK_SECRET: z.string().min(1),
+  PTG_RUN_TOKEN_SECRET: z.string().min(32)
 })
 
 export type AiEnv = z.infer<typeof aiEnvSchema>

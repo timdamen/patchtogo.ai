@@ -17,6 +17,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 - `pnpm --filter agent triage <GHSA-id> [package]`: triage a real advisory with the configured model.
 - `pnpm --filter agent retry [<GHSA-id>[:<package>]]`: without an argument, list failed runs and advisories whose queue job failed; with one, retry them from their failed step. In production: `railway ssh -s agent -- node apps/agent/src/retry-cli.ts <id>`.
 - `pnpm --filter agent fix --proxy-url <model proxy URL>`: run the fixer in a Vercel Sandbox on the `lodash.set` fixture (GHSA-p6mc-m468-83gw). Needs `VERCEL_OIDC_TOKEN` (`vercel env pull apps/agent/.env.sandbox`) and `PTG_RUN_TOKEN` or `PTG_RUN_TOKEN_SECRET`; `--help` lists the resume and hostile-config options.
+- `pnpm --filter agent fork <npm-package> [--range <vulnerable range>]`: fork the package into `PTG_FORK_ORG`, run the tarball-match check in a Vercel Sandbox and cut the scaffolded base branch, as a "patch" triage would (in-memory store, creates real repositories). Needs `GITHUB_APP_ID` with `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH`, and `VERCEL_OIDC_TOKEN`.
 - `pnpm docs:dev`, `pnpm docs:build`: the docs site.
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every workspace package.
 - `pnpm lint`, `pnpm fmt`, `pnpm fmt:check`, `pnpm knip`, `pnpm check:comments`: the quality checks, repo-wide.

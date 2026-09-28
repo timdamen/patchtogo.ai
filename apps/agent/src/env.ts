@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const aiEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_WORKSPACE_ID: z.string().min(1).optional(),
   PTG_MODEL: z.string().min(1).default('claude-opus-5-5')
 })
 

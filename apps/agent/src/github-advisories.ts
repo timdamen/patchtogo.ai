@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Advisory } from './advisory.ts'
+import type { SecurityAdvisory } from './advisory.ts'
 
 const globalAdvisorySchema = z.object({
   ghsa_id: z.string(),
@@ -16,29 +16,28 @@ const globalAdvisorySchema = z.object({
   )
 })
 
-export function toNpmAdvisories(raw: unknown): Advisory[] {
+export function parseGlobalAdvisory(raw: unknown): SecurityAdvisory {
   const advisory = globalAdvisorySchema.parse(raw)
-  const severity = advisory.severity === 'medium' ? 'moderate' : advisory.severity
-  if (severity === 'unknown') return []
-
-  return advisory.vulnerabilities
-    .filter((v) => v.package.ecosystem === 'npm')
-    .map((v) => ({
-      ghsaId: advisory.ghsa_id,
-      cveId: advisory.cve_id,
+  return {
+    ghsaId: advisory.ghsa_id,
+    cveId: advisory.cve_id,
+    summary: advisory.summary,
+    description: advisory.description ?? '',
+    severity: advisory.severity === 'medium' ? 'moderate' : advisory.severity,
+    vulnerabilities: advisory.vulnerabilities.map((v) => ({
+      ecosystem: v.package.ecosystem,
       packageName: v.package.name,
-      vulnerableRange: v.vulnerable_version_range ?? '*',
-      patchedVersion: v.first_patched_version,
-      severity,
-      summary: advisory.summary,
-      description: advisory.description ?? ''
+      vulnerableRange: v.vulnerable_version_range,
+      patchedVersion: v.first_patched_version
     }))
+  }
 }
 
-export async function fetchNpmAdvisories(ghsaId: string): Promise<Advisory[]> {
+export async function fetchGlobalAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined> {
   const response = await fetch(`https://api.github.com/advisories/${encodeURIComponent(ghsaId)}`, {
     headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
   })
+  if (response.status === 404) return undefined
   if (!response.ok) throw new Error(`GitHub advisory ${ghsaId}: HTTP ${response.status}`)
-  return toNpmAdvisories(await response.json())
+  return parseGlobalAdvisory(await response.json())
 }

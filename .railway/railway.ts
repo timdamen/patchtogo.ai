@@ -39,6 +39,9 @@ export default defineRailway(() => {
       GITHUB_APP_PRIVATE_KEY: preserve(),
       GITHUB_TOKEN: preserve(),
       DISCORD_WEBHOOK_URL: preserve(),
+      VERCEL_TOKEN: preserve(),
+      VERCEL_TEAM_ID: preserve(),
+      VERCEL_PROJECT_ID: preserve(),
       PTG_MAX_CONCURRENT_RUNS: '2'
     }
   })

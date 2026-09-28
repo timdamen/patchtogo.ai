@@ -20,6 +20,15 @@ const system = [
 ].join('\n')
 
 export async function triageAdvisory(model: LanguageModel, advisory: Advisory): Promise<Triage> {
+  if (advisory.patchedVersion) {
+    return {
+      decision: 'skip',
+      reason: `${advisory.packageName} ${advisory.patchedVersion} already fixes ${advisory.ghsaId}.`,
+      suspectedFiles: [],
+      fixStrategy: ''
+    }
+  }
+
   const { output } = await generateText({
     model,
     system,

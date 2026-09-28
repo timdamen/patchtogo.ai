@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { toNpmAdvisories } from '../src/github-advisories.ts'
+import { npmAdvisories } from '../src/advisory.ts'
+import { parseGlobalAdvisory } from '../src/github-advisories.ts'
 
 const raw = {
   ghsa_id: 'GHSA-p6mc-m468-83gw',
@@ -26,15 +27,28 @@ const raw = {
   ]
 }
 
-describe('toNpmAdvisories', () => {
-  it('keeps one entry per npm package and normalises severity', () => {
-    const advisories = toNpmAdvisories(raw)
+describe('parseGlobalAdvisory', () => {
+  it('keeps every vulnerability and normalises severity', () => {
+    const advisory = parseGlobalAdvisory(raw)
+
+    expect(advisory.severity).toBe('moderate')
+    expect(advisory.vulnerabilities.map((v) => v.packageName)).toEqual([
+      'lodash',
+      'lodash.set',
+      'lodash-rails'
+    ])
+  })
+})
+
+describe('npmAdvisories', () => {
+  it('keeps one entry per npm package', () => {
+    const advisories = npmAdvisories(parseGlobalAdvisory(raw))
 
     expect(advisories.map((a) => a.packageName)).toEqual(['lodash', 'lodash.set'])
     expect(advisories[1]).toMatchObject({ patchedVersion: null, severity: 'moderate' })
   })
 
   it('drops advisories without a known severity', () => {
-    expect(toNpmAdvisories({ ...raw, severity: 'unknown' })).toEqual([])
+    expect(npmAdvisories(parseGlobalAdvisory({ ...raw, severity: 'unknown' }))).toEqual([])
   })
 })

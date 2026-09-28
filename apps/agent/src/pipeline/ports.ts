@@ -12,6 +12,24 @@ export interface TestResult {
   output: string
 }
 
+export interface ModelSpend {
+  usd: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
+
+export interface FixSession {
+  id: string
+  transcript: string
+  totals: ModelSpend
+}
+
+export interface FixCost extends ModelSpend {
+  sandboxSeconds: number
+}
+
 export interface FixRequest {
   runId: string
   advisory: Advisory
@@ -19,6 +37,7 @@ export interface FixRequest {
   source: { repository: string; branch: string }
   instructions: string[]
   untrustedContext: string[]
+  resume?: { session: FixSession; diff: string }
 }
 
 export interface FixResult {
@@ -27,6 +46,8 @@ export interface FixResult {
   regressionAfter: TestResult
   upstreamTests: TestResult
   summary: string
+  cost: FixCost
+  session: FixSession
 }
 
 export interface Fixer {

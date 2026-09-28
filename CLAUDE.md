@@ -8,13 +8,14 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 
 - `apps/agent/`: the Node service that does the heavy lifting. A Hono server receives GitHub webhooks. The Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) handles single-call triage; the fix itself will run on the Claude Agent SDK (the Claude Code engine, with custom subagents) inside a sandbox, per `.scratch/patch-pipeline/spec.md`. TypeScript runs directly on Node 24 through type stripping, with no build step, so only erasable syntax is allowed and relative imports end in `.ts`. Its `.env` sits inside the app folder (see `.env.example`). It deploys to Railway (`apps/agent/railway.json`).
 - `apps/docs/`: the VitePress site, deployed to the Vercel project `focusring/patchtogo` (root directory `apps/docs`, output `.vitepress/dist`, clean URLs from `apps/docs/vercel.json`). Pushes to `main` deploy to production.
-- `packages/`: shared libraries. Empty for now; the workspace glob already includes it.
+- `packages/fixer-runner/`: the fixer runner that runs inside the Vercel Sandbox. It calls the Claude Agent SDK (pinned to an exact version) and re-runs the regression test deterministically. The agent service ships its `src/` into the sandbox and imports only `@patchtogo/fixer-runner/protocol`, never the SDK. Keep it free of the agent's dependencies and secrets.
 - `scripts/`: the checks the git hooks run.
 
 ## Commands
 
 - `pnpm dev`: the agent server with watch mode.
 - `pnpm --filter agent triage <GHSA-id> [package]`: triage a real advisory with the configured model.
+- `pnpm --filter agent fix --proxy-url <model proxy URL>`: run the fixer in a Vercel Sandbox on the `lodash.set` fixture (GHSA-p6mc-m468-83gw). Needs `VERCEL_OIDC_TOKEN` (`vercel env pull apps/agent/.env.sandbox`) and `PTG_RUN_TOKEN` or `PTG_RUN_TOKEN_SECRET`; `--help` lists the resume and hostile-config options.
 - `pnpm docs:dev`, `pnpm docs:build`: the docs site.
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every workspace package.
 - `pnpm lint`, `pnpm fmt`, `pnpm fmt:check`, `pnpm knip`, `pnpm check:comments`: the quality checks, repo-wide.

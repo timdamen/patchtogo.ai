@@ -39,7 +39,7 @@ try {
     for (const runId of retriedRuns) console.log(`queued a retry of ${runId}`)
     if (retriedJobs > 0) console.log(`re-queued ${retriedJobs} failed job(s) for ${target}`)
     if (retriedRuns.length === 0 && retriedJobs === 0) {
-      console.error(`nothing to retry for ${target}: no failed run and no failed queue job`)
+      console.error(`nothing to retry for ${target}: no failed or held run and no failed queue job`)
       process.exitCode = 1
     }
   }

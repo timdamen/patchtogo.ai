@@ -8,13 +8,29 @@ export interface RepoRef {
   repo: string
 }
 
-export type FileChange = { path: string; content: string } | { path: string; delete: true }
+export type FileMode = '100644' | '100755'
+
+export type FileChange =
+  | { path: string; content: string; mode?: FileMode }
+  | { path: string; delete: true }
 
 export interface NewBranch {
   name: string
   parent: string
   message: string
   changes: FileChange[]
+}
+
+export interface PullRequest {
+  number: number
+  url: string
+}
+
+export interface NewPullRequest {
+  head: string
+  base: string
+  title: string
+  body: string
 }
 
 export interface GitHub {
@@ -31,6 +47,9 @@ export interface GitHub {
   deleteBranch(repo: RepoRef, branch: string): Promise<void>
   setDefaultBranch(repo: RepoRef, branch: string): Promise<void>
   enableActions(repo: RepoRef): Promise<void>
+  findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined>
+  openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest>
+  requestTeamReview(repo: RepoRef, pullRequest: number, team: string): Promise<void>
 }
 
 export interface PublishedVersion {
@@ -104,6 +123,7 @@ export interface FixRequest {
   advisory: Advisory
   triage: Triage
   source: { repository: string; branch: string }
+  modelToken: string
   instructions: string[]
   untrustedContext: string[]
   resume?: { session: FixSession; diff: string }
@@ -121,6 +141,15 @@ export interface FixResult {
 
 export interface Fixer {
   fix(request: FixRequest): Promise<FixResult>
+}
+
+export interface ModelGrant {
+  token: string
+  revoke(): Promise<void>
+}
+
+export interface ModelAccess {
+  grant(runId: string): Promise<ModelGrant>
 }
 
 export interface RunFilter {
@@ -155,6 +184,8 @@ export interface Store {
   listEvents(runId: string): Promise<RunEvent[]>
   recordCost(cost: RunCost): Promise<void>
   listCosts(runId: string): Promise<RunCost[]>
+  saveSession(runId: string, session: FixSession): Promise<void>
+  getSession(runId: string): Promise<FixSession | undefined>
 }
 
 export class StaleRunError extends Error {
@@ -169,7 +200,15 @@ export interface NeedsHumanNotification {
   reason: string
 }
 
-export type Notification = NeedsHumanNotification
+export interface PatchPrOpenedNotification {
+  type: 'patch-pr-opened'
+  runId: string
+  ghsaId: string
+  packageName: string
+  url: string
+}
+
+export type Notification = NeedsHumanNotification | PatchPrOpenedNotification
 
 export interface Notifier {
   notify(notification: Notification): Promise<void>
@@ -184,6 +223,7 @@ export interface Ports {
   registry: Registry
   builder: Builder
   fixer: Fixer
+  modelAccess: ModelAccess
   model: LanguageModel
   store: Store
   notifier: Notifier

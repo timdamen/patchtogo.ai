@@ -6,7 +6,7 @@ import { throttling } from '@octokit/plugin-throttling'
 import { Octokit } from '@octokit/rest'
 import type { GitHubAppEnv } from './env.ts'
 import { parseGlobalAdvisory } from './github-advisories.ts'
-import type { GitHub, RepoRef } from './pipeline/ports.ts'
+import type { GitHub, PullRequest, RepoRef } from './pipeline/ports.ts'
 import type { SourceArchive } from './sandbox.ts'
 import { repoName } from './upstream.ts'
 
@@ -112,6 +112,20 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     return response?.data.object.sha
   }
 
+  async function openPullRequestFrom(
+    repo: RepoRef,
+    head: string
+  ): Promise<PullRequest | undefined> {
+    const { data } = await gh.rest.pulls.list({
+      ...repo,
+      head: `${repo.owner}:${head}`,
+      state: 'open',
+      per_page: 1
+    })
+    const [found] = data
+    return found && { number: found.number, url: found.html_url }
+  }
+
   async function waitUntilReady(fork: RepoRef, branch: string): Promise<void> {
     const deadline = Date.now() + readyTimeoutMs
     while (!(await commitSha(fork, branch))) {
@@ -200,7 +214,7 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
             ? { path: change.path, mode: '100644' as const, type: 'blob' as const, sha: null }
             : {
                 path: change.path,
-                mode: '100644' as const,
+                mode: change.mode ?? ('100644' as const),
                 type: 'blob' as const,
                 content: change.content
               }
@@ -237,6 +251,27 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
 
     async enableActions(repo) {
       await gh.rest.actions.setGithubActionsPermissionsRepository({ ...repo, enabled: true })
+    },
+
+    findPullRequest: openPullRequestFrom,
+
+    async openPullRequest(repo, { head, base, title, body }) {
+      try {
+        const { data } = await gh.rest.pulls.create({ ...repo, head, base, title, body })
+        return { number: data.number, url: data.html_url }
+      } catch (error) {
+        const existing = statusOf(error) === 422 ? await openPullRequestFrom(repo, head) : undefined
+        if (existing) return existing
+        throw error
+      }
+    },
+
+    async requestTeamReview(repo, pullRequest, team) {
+      await gh.rest.pulls.requestReviewers({
+        ...repo,
+        pull_number: pullRequest,
+        team_reviewers: [team]
+      })
     },
 
     async sourceArchive(source) {

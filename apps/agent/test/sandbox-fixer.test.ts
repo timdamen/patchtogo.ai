@@ -25,6 +25,7 @@ const request: FixRequest = {
     fixStrategy: 'refuse prototype keys'
   },
   source: { repository: 'patchtogo-ai/lodash.set', branch: 'ptg/base-4.3.2' },
+  modelToken: 'ptg-run.eyJydW4iOiJ4In0.c2lnbmF0dXJl',
   instructions: [],
   untrustedContext: ['a comment']
 }
@@ -146,7 +147,7 @@ describe('sandbox fixer', () => {
     const input = runnerInput(request, settings)
     expect(runnerInputSchema.parse(input)).toEqual(input)
     const serialised = JSON.stringify(input)
-    expect(serialised).not.toMatch(/sk-ant|ghp_|npm_|postgres:\/\//)
+    expect(serialised).not.toMatch(/sk-ant|ghp_|npm_|postgres:\/\/|ptg-run\./)
     expect(input.tokenPath).toMatch(/^\/vercel\/ptg\//)
     expect(input.session.resume).toBe(false)
     expect(input.priorDiff).toBeNull()

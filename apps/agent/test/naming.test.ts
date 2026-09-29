@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { baseBranchName, packageSlug, patchedPackageName, patchedVersion } from '../src/naming.ts'
+import {
+  baseBranchName,
+  BRANCH_NAMESPACE,
+  packageSlug,
+  patchBranchName,
+  patchedPackageName,
+  patchedVersion
+} from '../src/naming.ts'
 
 const settings = { npmScope: 'patchtogo.ai' }
 
@@ -35,5 +42,11 @@ describe('naming', () => {
   it('cuts one base branch per package and upstream version', () => {
     expect(baseBranchName('escape-html', '1.0.3')).toBe('ptg/base/escape-html/1.0.3')
     expect(baseBranchName('@acme/strings', '2.1.0')).toBe('ptg/base/acme__strings/2.1.0')
+  })
+
+  it('keeps patch branches inside the namespace that verifying never prunes', () => {
+    const name = patchBranchName('@acme/strings', '2.1.0', 'GHSA-p6mc-m468-83gw')
+    expect(name).toBe('ptg/patch/acme__strings/2.1.0/ghsa-p6mc-m468-83gw')
+    expect(name.startsWith(BRANCH_NAMESPACE)).toBe(true)
   })
 })

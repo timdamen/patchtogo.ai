@@ -1,8 +1,12 @@
 import { npmAdvisories } from '../advisory.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
+import type { Automation } from './automation.ts'
 import type { PipelineEvent } from './events.ts'
+import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
 import {
+  IllegalTransitionError,
+  isTerminal,
   newPatchRun,
   retry,
   transition,
@@ -17,7 +21,9 @@ export interface Pipeline {
   handle(event: PipelineEvent): Promise<void>
 }
 
-export type PipelineSettings = ForkSettings
+export interface PipelineSettings extends ForkSettings {
+  automation: Automation
+}
 
 const triageOutcomes = {
   patch: 'forking',
@@ -45,9 +51,12 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     },
     async triaged(run) {
       if (!run.triage) throw new Error(`patch run ${run.id} has no triage`)
-      return { to: triageOutcomes[run.triage.decision], reason: run.triage.reason }
+      const to = triageOutcomes[run.triage.decision]
+      if (to === 'forking' && settings.automation === 'triage-only') return undefined
+      return { to, reason: run.triage.reason }
     },
-    ...forkingSteps(ports, settings)
+    ...forkingSteps(ports, settings),
+    ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {})
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {
@@ -100,6 +109,14 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
   async function retryRequested(id: string): Promise<void> {
     const run = await store.getRun(id)
     if (!run) throw new Error(`no patch run ${id}`)
+    if (run.state !== 'failed') {
+      if (isTerminal(run.state)) {
+        throw new IllegalTransitionError(
+          `patch run ${run.id} is ${run.state}, so it cannot be retried`
+        )
+      }
+      return advance(run)
+    }
     const resumed = retry(run, clock.now())
     if (await save(resumed)) await advance(resumed)
   }

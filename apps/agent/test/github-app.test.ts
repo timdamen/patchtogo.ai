@@ -5,6 +5,7 @@ import { createGitHubApp } from '../src/github-app.ts'
 interface Call {
   method: string
   path: string
+  query: URLSearchParams
   body: unknown
 }
 
@@ -19,6 +20,7 @@ function fakeGitHub(...routes: Route[]) {
     const call = {
       method: init?.method ?? 'GET',
       path: decodeURIComponent(url.pathname),
+      query: url.searchParams,
       body: init?.body ? JSON.parse(String(init.body)) : undefined
     }
     calls.push(call)
@@ -176,5 +178,87 @@ describe('GitHub App adapter', () => {
     })
 
     expect(head).toBe(sha('d'))
+  })
+
+  it('keeps the file mode a change asks for', async () => {
+    const { github, calls } = fakeGitHub(
+      on('GET', `/repos/patchtogo-ai/escape-html/git/commits/${sha('a')}`, 200, {
+        tree: { sha: sha('t') }
+      }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/trees', 201, { sha: sha('u') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/commits', 201, { sha: sha('c') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/refs', 201, {})
+    )
+
+    await github.createBranch(into, {
+      name: 'ptg/patch/escape-html/1.0.3/ghsa-x',
+      parent: sha('a'),
+      message: 'fix',
+      changes: [{ path: 'test/run.sh', content: 'echo ok\n', mode: '100755' }]
+    })
+
+    expect(calls.find((c) => c.path.endsWith('/git/trees'))?.body).toMatchObject({
+      tree: [{ path: 'test/run.sh', mode: '100755' }]
+    })
+  })
+
+  it('opens a pull request inside the fork and requests the reviewer team', async () => {
+    const pr = { number: 7, html_url: 'https://github.com/patchtogo-ai/escape-html/pull/7' }
+    const { github, calls } = fakeGitHub(
+      on('POST', '/repos/patchtogo-ai/escape-html/pulls', 201, pr),
+      on('POST', '/repos/patchtogo-ai/escape-html/pulls/7/requested_reviewers', 201, {})
+    )
+
+    const opened = await github.openPullRequest(into, {
+      head: 'ptg/patch/escape-html/1.0.3/ghsa-x',
+      base: 'ptg/base/escape-html/1.0.3',
+      title: 't',
+      body: 'b'
+    })
+    await github.requestTeamReview(into, opened.number, 'reviewers')
+
+    expect(opened).toEqual({ number: 7, url: pr.html_url })
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      [
+        'POST',
+        '/repos/patchtogo-ai/escape-html/pulls',
+        {
+          head: 'ptg/patch/escape-html/1.0.3/ghsa-x',
+          base: 'ptg/base/escape-html/1.0.3',
+          title: 't',
+          body: 'b'
+        }
+      ],
+      [
+        'POST',
+        '/repos/patchtogo-ai/escape-html/pulls/7/requested_reviewers',
+        { team_reviewers: ['reviewers'] }
+      ]
+    ])
+  })
+
+  it('finds the open pull request of a branch, also when opening one races another attempt', async () => {
+    const pr = { number: 7, html_url: 'https://github.com/patchtogo-ai/escape-html/pull/7' }
+    const { github, calls } = fakeGitHub(
+      on('POST', '/repos/patchtogo-ai/escape-html/pulls', 422, {
+        message: 'A pull request already exists for patchtogo-ai:ptg/patch/x.'
+      }),
+      on('GET', '/repos/patchtogo-ai/escape-html/pulls', 200, [pr])
+    )
+
+    const found = await github.findPullRequest(into, 'ptg/patch/x')
+    const opened = await github.openPullRequest(into, {
+      head: 'ptg/patch/x',
+      base: 'ptg/base/x',
+      title: 't',
+      body: 'b'
+    })
+
+    expect(found).toEqual({ number: 7, url: pr.html_url })
+    expect(opened).toEqual(found)
+    const lookup = calls.find((c) => c.method === 'GET')
+    expect(lookup?.path).toBe('/repos/patchtogo-ai/escape-html/pulls')
+    expect(lookup?.query.get('head')).toBe('patchtogo-ai:ptg/patch/x')
+    expect(lookup?.query.get('state')).toBe('open')
   })
 })

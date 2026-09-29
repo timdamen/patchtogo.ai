@@ -1,6 +1,6 @@
 import type { Advisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
-import type { RepoRef } from './ports.ts'
+import type { PullRequest, RepoRef, TestResult } from './ports.ts'
 
 export const runStates = [
   'detected',
@@ -27,7 +27,7 @@ const nextStates: Record<RunState, readonly RunState[]> = {
   'needs-human': [],
   forking: ['verifying', 'needs-human'],
   verifying: ['fixing', 'needs-human'],
-  fixing: ['in-review', 'needs-human'],
+  fixing: ['fixing', 'in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],
   approved: ['released'],
   released: ['upstreamed', 'superseded'],
@@ -60,11 +60,23 @@ export interface BaseBranch {
   sha: string
 }
 
+export interface FixOutcome {
+  sessionId: string
+  diff: string
+  regressionBefore: TestResult
+  regressionAfter: TestResult
+  upstreamTests: TestResult
+  summary: string
+}
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
   fork?: RepoRef
   baseBranch?: BaseBranch
+  fix?: FixOutcome
+  patchBranch?: BaseBranch
+  pullRequest?: PullRequest
 }
 
 export interface RunFailure {

@@ -191,6 +191,48 @@ describe('operator retry', { timeout: 30_000 }, () => {
     )
   })
 
+  it('resumes runs held by the automation level once the operator retries them', async () => {
+    const { queue, db } = await startQueue()
+    const store = new PostgresStore(db)
+    const held = createTestPipeline({ store, triage: () => patch, automation: 'triage-only' })
+    seedUpstream(held.github, held.registry, { name: 'lodash.set', version: '4.3.2' })
+    held.github.publishAdvisory({
+      ghsaId: 'GHSA-p6mc-m468-83gw',
+      type: 'reviewed',
+      cveId: null,
+      summary: 'Prototype Pollution',
+      description: 'untrusted',
+      severity: 'high',
+      vulnerabilities: [
+        {
+          ecosystem: 'npm',
+          packageName: 'lodash.set',
+          vulnerableRange: '<= 4.3.2',
+          patchedVersion: null
+        }
+      ]
+    })
+    const runId = 'GHSA-p6mc-m468-83gw:lodash.set'
+    await held.pipeline.handle(published('GHSA-p6mc-m468-83gw'))
+    expect((await store.getRun(runId))?.state).toBe('triaged')
+    const forking = held.withAutomation('fork')
+    await queue.work((event) => forking.handle(event))
+
+    expect(await requestRetry('GHSA-p6mc-m468-83gw', { store, queue })).toEqual({
+      retriedJobs: 0,
+      retriedRuns: [runId]
+    })
+
+    await vi.waitFor(
+      async () => expect((await store.getRun(runId))?.state).toBe('fixing'),
+      waitLong
+    )
+    expect(await requestRetry(runId, { store, queue })).toEqual({
+      retriedJobs: 0,
+      retriedRuns: [runId]
+    })
+  })
+
   it('does nothing for a run that has not failed and refuses unknown runs', async () => {
     const { queue, db } = await startQueue()
     const store = new PostgresStore(db)

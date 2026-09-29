@@ -3,10 +3,14 @@ import type { Notification, Notifier } from './pipeline/ports.ts'
 const SUPPRESS_EMBEDS = 1 << 2
 const MAX_REASON_LENGTH = 1500
 
+function detail(notification: Notification): string {
+  return notification.type === 'needs-human' ? notification.reason : notification.url
+}
+
 export const consoleNotifier: Notifier = {
   async notify(notification) {
     console.log(
-      `${notification.type}: ${notification.ghsaId} ${notification.packageName}: ${notification.reason}`
+      `${notification.type}: ${notification.ghsaId} ${notification.packageName}: ${detail(notification)}`
     )
   }
 }
@@ -17,12 +21,24 @@ function untrustedBlock(text: string): string {
   return ['```text', clipped.replaceAll('`', "'"), '```'].join('\n')
 }
 
+function inline(text: string): string {
+  return `\`${text.replaceAll('`', "'")}\``
+}
+
 function discordMessage(notification: Notification): string {
-  const { ghsaId, packageName, runId, reason } = notification
+  const { ghsaId, packageName, runId } = notification
+  const advisory = `<https://github.com/advisories/${encodeURIComponent(ghsaId)}>`
+  if (notification.type === 'patch-pr-opened') {
+    return [
+      `**Patch PR ready for review:** ${inline(packageName)} for ${ghsaId}`,
+      `<${encodeURI(notification.url)}>`,
+      `Run ${inline(runId)} · ${advisory}`
+    ].join('\n')
+  }
   return [
-    `**Needs a human:** \`${packageName.replaceAll('`', "'")}\` for ${ghsaId}`,
-    `Run \`${runId.replaceAll('`', "'")}\` · <https://github.com/advisories/${encodeURIComponent(ghsaId)}>`,
-    untrustedBlock(reason)
+    `**Needs a human:** ${inline(packageName)} for ${ghsaId}`,
+    `Run ${inline(runId)} · ${advisory}`,
+    untrustedBlock(notification.reason)
   ].join('\n')
 }
 

@@ -55,16 +55,6 @@ export const runnerCommand = {
   ]
 }
 
-export interface ModelGrant {
-  token: string
-  revoke(): Promise<void>
-}
-
-export interface ModelAccess {
-  baseUrl: string
-  grant(runId: string, ttlMs: number): Promise<ModelGrant>
-}
-
 export interface FixerLimits {
   maxTurns: number
   maxBudgetUsd: number
@@ -74,13 +64,17 @@ export interface FixerLimits {
 
 export interface SandboxFixerOptions {
   credentials?: SandboxCredentials
-  modelAccess: ModelAccess
+  proxyBaseUrl: string
   sourceArchive: SourceArchive
   models: RunnerInput['models']
   limits: FixerLimits
   vcpus?: number
   now?: () => Date
   onLine?: (line: RunnerLine) => void
+}
+
+export function modelTokenTtlMs(limits: Pick<FixerLimits, 'sandboxTimeoutMs'>): number {
+  return limits.sandboxTimeoutMs + 5 * 60_000
 }
 
 export function egressPolicy(proxyBaseUrl: string): NetworkPolicy {
@@ -204,7 +198,7 @@ async function collect(
 }
 
 export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
-  const { credentials, modelAccess, sourceArchive, limits, onLine } = options
+  const { credentials, proxyBaseUrl, sourceArchive, limits, onLine } = options
   const now = options.now ?? (() => new Date())
 
   async function provision(sandbox: Sandbox) {
@@ -288,10 +282,9 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
 
   return {
     async fix(request) {
-      const grant = await modelAccess.grant(request.runId, limits.sandboxTimeoutMs + 5 * 60_000)
       let sandbox: Sandbox | undefined
       try {
-        const input = runnerInput(request, { ...options, proxyBaseUrl: modelAccess.baseUrl })
+        const input = runnerInput(request, { ...options, proxyBaseUrl })
         const created = now().getTime()
         sandbox = await openSandbox({
           credentials,
@@ -301,14 +294,14 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
           purpose: 'fixer'
         })
         await provision(sandbox)
-        await sandbox.update({ networkPolicy: egressPolicy(modelAccess.baseUrl) })
-        await stage(sandbox, request, input, grant.token)
+        await sandbox.update({ networkPolicy: egressPolicy(proxyBaseUrl) })
+        await stage(sandbox, request, input, request.modelToken)
         const runnerExit = await runRunner(sandbox)
         return await collect(sandbox, request, runnerExit, () =>
           Math.round((now().getTime() - created) / 1000)
         )
       } finally {
-        await Promise.allSettled([grant.revoke(), sandbox?.stop()])
+        await sandbox?.stop().catch(() => undefined)
       }
     }
   }

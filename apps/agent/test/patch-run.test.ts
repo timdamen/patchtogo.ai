@@ -15,7 +15,7 @@ const specTable: Record<string, RunState[]> = {
   triaged: ['skipped', 'needs-human', 'forking'],
   forking: ['verifying', 'needs-human'],
   verifying: ['fixing', 'needs-human'],
-  fixing: ['in-review', 'needs-human'],
+  fixing: ['fixing', 'in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],
   approved: ['released'],
   released: ['upstreamed', 'superseded'],

@@ -8,10 +8,10 @@ import { fixerEnvSchema } from './env.ts'
 import { fixerSettings } from './fixer/config.ts'
 import { HOSTILE_MARKER, hostileConfig } from './fixer/hostile-config.ts'
 import { describeLine } from './fixer/runner-lines.ts'
-import { createSandboxFixer, type ModelGrant } from './fixer/sandbox-fixer.ts'
+import { createSandboxFixer, modelTokenTtlMs } from './fixer/sandbox-fixer.ts'
 import { fetchGlobalAdvisory } from './github-advisories.ts'
-import type { FixRequest, ModelSpend } from './pipeline/ports.ts'
-import { createMemoryRevocationStore, createRunTokens } from './run-tokens.ts'
+import type { FixRequest, ModelGrant, ModelSpend } from './pipeline/ports.ts'
+import { createMemoryRevocationStore, createRunTokens, runTokenAccess } from './run-tokens.ts'
 
 const run = promisify(execFile)
 
@@ -59,14 +59,13 @@ if (!proxyBaseUrl) {
   process.exit(2)
 }
 
-async function grant(runId: string, ttlMs: number): Promise<ModelGrant> {
+async function grant(runId: string): Promise<ModelGrant> {
   const given = process.env.PTG_RUN_TOKEN
   if (given) return { token: given, revoke: async () => {} }
   const secret = process.env.PTG_RUN_TOKEN_SECRET
   if (!secret) throw new Error('set PTG_RUN_TOKEN or PTG_RUN_TOKEN_SECRET')
   const tokens = createRunTokens({ secret, revocations: createMemoryRevocationStore() })
-  const { token } = tokens.issue(runId, ttlMs)
-  return { token, revoke: () => tokens.revoke(token) }
+  return runTokenAccess(tokens, modelTokenTtlMs(fixerSettings(env).limits)).grant(runId)
 }
 
 async function npmTarball(hostile: boolean): Promise<Uint8Array> {
@@ -111,7 +110,7 @@ if (!packageAdvisory) throw new Error(`${fixture.ghsaId} does not list ${fixture
 const started = Date.now()
 const fixer = createSandboxFixer({
   ...fixerSettings(env),
-  modelAccess: { baseUrl: proxyBaseUrl, grant },
+  proxyBaseUrl,
   sourceArchive: () => npmTarball(values['hostile-config']),
   onLine(line) {
     const text = describeLine(line)
@@ -120,17 +119,20 @@ const fixer = createSandboxFixer({
   }
 })
 
+const runId = `${fixture.ghsaId}:${fixture.packageName}`
+const modelGrant = await grant(runId)
 const request: FixRequest = {
-  runId: `${fixture.ghsaId}:${fixture.packageName}`,
+  runId,
   advisory: packageAdvisory,
   triage: fixture.triage,
   source: { repository: `npm:${fixture.packageName}`, branch: fixture.version },
+  modelToken: modelGrant.token,
   instructions: values.instruction,
   untrustedContext: values.untrusted,
   resume: values.resume ? await previous(values.resume) : undefined
 }
 
-const result = await fixer.fix(request)
+const result = await fixer.fix(request).finally(() => modelGrant.revoke())
 
 const out = values.out ?? (await mkdtemp(path.join(tmpdir(), 'ptg-fix-')))
 await mkdir(out, { recursive: true })

@@ -2,6 +2,8 @@ import type { Advisory } from '../advisory.ts'
 import type { PatchRun, RunDetails, RunFailure, RunState } from '../pipeline/patch-run.ts'
 import {
   StaleRunError,
+  type FixSession,
+  type ModelSpend,
   type RunCost,
   type RunEvent,
   type RunFilter,
@@ -40,6 +42,12 @@ interface CostRow {
   cost_usd: number | null
   sandbox_seconds: number
   at: Date
+}
+
+interface SessionRow {
+  session_id: string
+  transcript: string
+  totals: ModelSpend
 }
 
 const columnFields = new Set<string>([
@@ -244,5 +252,26 @@ export class PostgresStore implements Store {
       sandboxSeconds: row.sandbox_seconds,
       at: row.at
     }))
+  }
+
+  async saveSession(runId: string, session: FixSession): Promise<void> {
+    await this.#db.query(
+      `insert into run_sessions (run_id, session_id, transcript, totals, updated_at)
+       values ($1, $2, $3, $4::jsonb, now())
+       on conflict (run_id) do update set
+         session_id = excluded.session_id,
+         transcript = excluded.transcript,
+         totals = excluded.totals,
+         updated_at = excluded.updated_at`,
+      [runId, session.id, session.transcript, json(session.totals)]
+    )
+  }
+
+  async getSession(runId: string): Promise<FixSession | undefined> {
+    const [row] = await this.#db.query<SessionRow>(
+      'select session_id, transcript, totals from run_sessions where run_id = $1',
+      [runId]
+    )
+    return row && { id: row.session_id, transcript: row.transcript, totals: row.totals }
   }
 }

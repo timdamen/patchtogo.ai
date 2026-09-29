@@ -174,6 +174,28 @@ describe.each(stores)('the %s store', (_name, createStore) => {
     await expect(store.recordCost({ ...triage, runId: 'GHSA-none:nothing' })).rejects.toThrow()
   })
 
+  it('keeps the latest fix session per run outside the run details', async () => {
+    const store = await createStore()
+    const stored = await store.createRunIfAbsent(run('lodash.set'))
+    const totals = {
+      usd: 0.93,
+      inputTokens: 12,
+      outputTokens: 3400,
+      cacheReadTokens: 250_000,
+      cacheWriteTokens: 18_000
+    }
+    const first = { id: '6f1c1f0e-8a8e-4c55-9d7e-0c4a1c2b3d4e', transcript: 'H4sIAAAA', totals }
+    const second = { ...first, transcript: 'H4sIBBBB', totals: { ...totals, usd: 1.5 } }
+
+    expect(await store.getSession(stored.id)).toBeUndefined()
+    await store.saveSession(stored.id, first)
+    await store.saveSession(stored.id, second)
+
+    expect(await store.getSession(stored.id)).toEqual(second)
+    expect(await store.getRun(stored.id)).toEqual(stored)
+    await expect(store.saveSession('GHSA-none:nothing', first)).rejects.toThrow()
+  })
+
   it('hands out copies that callers cannot mutate', async () => {
     const store = await createStore()
     const stored = await store.createRunIfAbsent(run('lodash.set'))

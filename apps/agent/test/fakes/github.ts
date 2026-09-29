@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
 import type { SecurityAdvisory } from '../../src/advisory.ts'
-import type { GitHub, NewBranch, RepoRef } from '../../src/pipeline/ports.ts'
+import type {
+  GitHub,
+  NewBranch,
+  NewPullRequest,
+  PullRequest,
+  RepoRef
+} from '../../src/pipeline/ports.ts'
 
 export interface FakeCommit {
   sha: string
@@ -28,6 +34,11 @@ export interface NewRepository {
   message?: string
 }
 
+export interface FakePullRequest extends NewPullRequest, PullRequest {
+  repo: string
+  reviewTeams: string[]
+}
+
 type Method = Exclude<keyof GitHub, 'getAdvisory'>
 
 function key({ owner, repo }: RepoRef): string {
@@ -38,6 +49,7 @@ export class InMemoryGitHub implements GitHub {
   readonly advisories = new Map<string, SecurityAdvisory>()
   readonly repositories = new Map<string, FakeRepository>()
   readonly commits = new Map<string, FakeCommit>()
+  readonly pullRequests: FakePullRequest[] = []
   readonly calls: { method: Method; repo: string }[] = []
   readonly #failures = new Map<Method, Error>()
 
@@ -71,6 +83,17 @@ export class InMemoryGitHub implements GitHub {
   fileAt(ref: RepoRef, branch: string, path: string): string | undefined {
     const sha = this.repository(ref)?.branches.get(branch)
     return sha ? this.commits.get(sha)?.files[path] : undefined
+  }
+
+  changedFiles(ref: RepoRef, base: string, head: string): Record<string, string | null> {
+    const branches = this.repository(ref)?.branches
+    const before = this.commits.get(branches?.get(base) ?? '')?.files ?? {}
+    const after = this.commits.get(branches?.get(head) ?? '')?.files ?? {}
+    const changed: Record<string, string | null> = {}
+    for (const path of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (before[path] !== after[path]) changed[path] = after[path] ?? null
+    }
+    return changed
   }
 
   failNext(method: Method, error = new Error(`${method} failed`)): void {
@@ -194,5 +217,33 @@ export class InMemoryGitHub implements GitHub {
 
   async enableActions(repo: RepoRef): Promise<void> {
     this.#existing(repo, 'enableActions').actionsEnabled = true
+  }
+
+  async findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined> {
+    this.#existing(repo, 'findPullRequest')
+    const found = this.pullRequests.find((pr) => pr.repo === key(repo) && pr.head === head)
+    return found && { number: found.number, url: found.url }
+  }
+
+  async openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest> {
+    const repository = this.#existing(repo, 'openPullRequest')
+    for (const branch of [pullRequest.head, pullRequest.base]) {
+      if (!repository.branches.has(branch)) throw new Error(`no branch ${branch}`)
+    }
+    if (this.pullRequests.some((pr) => pr.repo === key(repo) && pr.head === pullRequest.head)) {
+      throw new Error(`a pull request for ${pullRequest.head} already exists`)
+    }
+    const number = this.pullRequests.length + 1
+    const url = `https://github.com/${repository.ref.owner}/${repository.ref.repo}/pull/${number}`
+    this.pullRequests.push({ ...pullRequest, number, url, repo: key(repo), reviewTeams: [] })
+    return { number, url }
+  }
+
+  async requestTeamReview(repo: RepoRef, pullRequest: number, team: string): Promise<void> {
+    const repository = this.#existing(repo, 'requestTeamReview')
+    const found = this.pullRequests.find((pr) => pr.repo === key(repo) && pr.number === pullRequest)
+    if (!found) throw new Error(`no pull request ${pullRequest}`)
+    if (!repository.teams.has(team)) throw new Error(`${team} cannot access ${key(repo)}`)
+    if (!found.reviewTeams.includes(team)) found.reviewTeams.push(team)
   }
 }

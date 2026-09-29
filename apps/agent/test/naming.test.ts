@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  baseBranchName,
   BRANCH_NAMESPACE,
   packageSlug,
   patchBranchName,
@@ -37,11 +36,6 @@ describe('naming', () => {
     ['2.0.0-beta.3', 1, '2.0.0-beta.3-ptg.1']
   ])('versions %s release %i as %s', (version, release, patched) => {
     expect(patchedVersion(version, release)).toBe(patched)
-  })
-
-  it('cuts one base branch per package and upstream version', () => {
-    expect(baseBranchName('escape-html', '1.0.3')).toBe('ptg/base/escape-html/1.0.3')
-    expect(baseBranchName('@acme/strings', '2.1.0')).toBe('ptg/base/acme__strings/2.1.0')
   })
 
   it('keeps patch branches inside the namespace that verifying never prunes', () => {

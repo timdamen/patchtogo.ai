@@ -5,7 +5,6 @@ export interface TarballComparison {
   matches: boolean
   missing: string[]
   differing: string[]
-  extra: string[]
 }
 
 const runtimeFields = [
@@ -79,10 +78,7 @@ export function compareTarballs(published: PackageFiles, built: PackageFiles): T
   }
   const fields = packageJsonDifferences(published.packageJson, built.packageJson)
   if (fields.length > 0) differing.unshift(`package.json (${fields.join(', ')})`)
-  const extra = Object.keys(built.files)
-    .filter((path) => !(path in published.files))
-    .toSorted()
-  return { matches: missing.length === 0 && differing.length === 0, missing, differing, extra }
+  return { matches: missing.length === 0 && differing.length === 0, missing, differing }
 }
 
 function listed(label: string, paths: string[]): string | undefined {

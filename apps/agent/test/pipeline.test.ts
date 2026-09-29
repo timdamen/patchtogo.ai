@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SecurityAdvisory, Vulnerability } from '../src/advisory.ts'
+import { IllegalTransitionError } from '../src/pipeline/patch-run.ts'
 import type { Triage } from '../src/triage.ts'
 import { createTestPipeline } from './fakes/pipeline.ts'
 import { seedUpstream } from './fakes/upstream.ts'
@@ -70,13 +71,20 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
     })
 
     it('skips a package that already has a patched version without calling the model', async () => {
-      const { pipeline, github, store, model } = createTestPipeline({ store: await createStore() })
+      const { pipeline, github, registry, store, model } = createTestPipeline({
+        store: await createStore()
+      })
+      registry.publish('lodash', '4.3.2')
       github.publishAdvisory(advisory(npmPackage('lodash', '4.17.19')))
 
       await pipeline.handle(published)
 
       const [run] = await store.listRuns({ ghsaId })
-      expect(run).toMatchObject({ state: 'skipped', triage: { decision: 'skip' } })
+      expect(run).toMatchObject({
+        state: 'skipped',
+        reason: `lodash 4.17.19 already fixes ${ghsaId}.`,
+        triage: { decision: 'skip' }
+      })
       expect(model.doGenerateCalls).toHaveLength(0)
     })
 
@@ -140,7 +148,7 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
         store: await createStore(),
         triage: (a) => (a.packageName === 'lodash.set' ? patch : needsHuman)
       })
-      const { pipeline, github, registry, store, model, notifier } = test
+      const { pipeline, github, registry, builder, store, model, notifier } = test
       seedLodashSet(test)
       registry.publish('lodash.setwith', '4.3.2')
       github.publishAdvisory(advisory(npmPackage('lodash.set'), npmPackage('lodash.setwith')))
@@ -152,6 +160,8 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
       expect(await store.listRuns({ ghsaId })).toEqual(before)
       expect(model.doGenerateCalls).toHaveLength(2)
       expect(notifier.notifications).toHaveLength(1)
+      expect(github.forks()).toHaveLength(1)
+      expect(builder.requests).toHaveLength(1)
     })
 
     it('ignores an advisory GitHub does not know', async () => {
@@ -273,7 +283,7 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
   })
 
   describe('failures and retries', () => {
-    it('records the failed step and resumes from it on retry', async () => {
+    it('records the failed step, resumes from it on retry and keeps an event per state', async () => {
       let modelDown = true
       const test = createTestPipeline({
         store: await createStore(),
@@ -300,44 +310,7 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
       const retried = await store.getRun(failed?.id ?? '')
       expect(retried).toMatchObject({ state: 'fixing', failure: null, triage: patch })
       expect(retried?.updatedAt).toEqual(clock.now())
-    })
-
-    it('rejects a retry of a run that has not failed', async () => {
-      const { pipeline, github, store } = createTestPipeline({
-        store: await createStore(),
-        triage: () => patch
-      })
-      github.publishAdvisory(advisory(npmPackage('lodash.set')))
-      await pipeline.handle(published)
-      const [run] = await store.listRuns({ ghsaId })
-
-      await expect(
-        pipeline.handle({ type: 'retry-requested', runId: run?.id ?? '' })
-      ).rejects.toThrow(/cannot be retried/)
-      expect(await store.getRun(run?.id ?? '')).toEqual(run)
-    })
-  })
-
-  describe('audit trail', () => {
-    it('records every state the run passed through, including a failure and its retry', async () => {
-      let modelDown = true
-      const test = createTestPipeline({
-        store: await createStore(),
-        triage: () => {
-          if (modelDown) throw new Error('model unavailable')
-          return patch
-        }
-      })
-      const { pipeline, github, store, clock } = test
-      seedLodashSet(test)
-      github.publishAdvisory(advisory(npmPackage('lodash.set')))
-      await pipeline.handle(published)
-      const [run] = await store.listRuns({ ghsaId })
-      modelDown = false
-      clock.advance(60_000)
-      await pipeline.handle({ type: 'retry-requested', runId: run?.id ?? '' })
-
-      const events = await store.listEvents(run?.id ?? '')
+      const events = await store.listEvents(failed?.id ?? '')
       expect(events.map((e) => [e.version, e.state])).toEqual([
         [0, 'detected'],
         [1, 'failed'],
@@ -351,7 +324,22 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
       expect(events.at(-1)?.at).toEqual(clock.now())
     })
 
-    it('records the token cost of each triage call against its run', async () => {
+    it('rejects a retry of a finished run with the error the queue worker drops', async () => {
+      const { pipeline, github, store } = createTestPipeline({ store: await createStore() })
+      github.publishAdvisory(advisory(npmPackage('lodash.set')))
+      await pipeline.handle(published)
+      const [run] = await store.listRuns({ ghsaId })
+      expect(run?.state).toBe('skipped')
+
+      await expect(
+        pipeline.handle({ type: 'retry-requested', runId: run?.id ?? '' })
+      ).rejects.toThrow(IllegalTransitionError)
+      expect(await store.getRun(run?.id ?? '')).toEqual(run)
+    })
+  })
+
+  describe('costs', () => {
+    it('records model tokens and sandbox time against the run', async () => {
       const test = createTestPipeline({ store: await createStore(), triage: () => patch })
       const { pipeline, github, store, clock } = test
       seedLodashSet(test)

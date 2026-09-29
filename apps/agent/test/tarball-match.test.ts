@@ -18,7 +18,7 @@ const published: PackageFiles = {
 describe('tarball-match check', () => {
   it('matches a build with the same files and the same runtime package.json', () => {
     const built: PackageFiles = {
-      files: { ...published.files, 'package.json': 'p2', 'extra.d.ts': 'x' },
+      files: { ...published.files, 'package.json': 'p2' },
       packageJson: {
         name: 'escape-html',
         version: '1.0.3',
@@ -32,8 +32,7 @@ describe('tarball-match check', () => {
     expect(compareTarballs(published, built)).toEqual({
       matches: true,
       missing: [],
-      differing: [],
-      extra: ['extra.d.ts']
+      differing: []
     })
   })
 
@@ -52,8 +51,7 @@ describe('tarball-match check', () => {
     expect(comparison).toEqual({
       matches: false,
       missing: ['LICENSE'],
-      differing: ['package.json (exports, dependencies)', 'index.js'],
-      extra: []
+      differing: ['package.json (exports, dependencies)', 'index.js']
     })
     expect(describeMismatch(comparison)).toBe(
       '2 differ (package.json (exports, dependencies), index.js); 1 missing from the build (LICENSE)'

@@ -2,7 +2,7 @@ import type { Advisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
 import type { PullRequest, RepoRef, TestResult } from './ports.ts'
 
-export const runStates = [
+const runStates = [
   'detected',
   'triaged',
   'skipped',
@@ -40,7 +40,7 @@ export function isTerminal(state: RunState): boolean {
   return state !== 'failed' && nextStates[state].length === 0
 }
 
-export function canTransition(from: RunState, to: RunState): boolean {
+function canTransition(from: RunState, to: RunState): boolean {
   if (to === 'failed') return from !== 'failed' && !isTerminal(from)
   return nextStates[from].includes(to)
 }
@@ -109,7 +109,7 @@ export class IllegalTransitionError extends Error {
   override name = 'IllegalTransitionError'
 }
 
-export function runId(ghsaId: string, packageName: string): string {
+function runId(ghsaId: string, packageName: string): string {
   return `${ghsaId}:${packageName}`
 }
 

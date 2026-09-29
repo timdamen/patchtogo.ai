@@ -30,6 +30,8 @@ Git hooks (`lefthook.yml`, installed by `pnpm install` through the root `prepare
 - **commit-msg**: Conventional Commits, `type(scope): subject`: lowercase subject, no trailing period, header at most 72 characters.
 - **pre-push**: `knip` for unused files, exports and dependencies.
 
+Tests follow the `test-audit` skill (installed globally in `~/.claude/skills/test-audit`): every new or changed test passes its authoring gate (what behaviour it protects, which credible regression fails it, why existing coverage misses it, and no test-only production seam), bug regressions must fail on the pre-fix code, and test sweeps use its audit mode.
+
 Code explains itself: `check:comments` rejects comments in JS and TS (tool directives excepted), so the why goes into `apps/docs/` or the commit message; formatting is oxfmt's job.
 
 ## Dependencies

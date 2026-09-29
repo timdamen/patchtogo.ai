@@ -8,7 +8,7 @@ const OUTPUT_LIMIT = 16_000
 
 type Verdict = NonNullable<RunnerResult['regression']>['verdict']
 
-export function regressionVerdict(before: TestRun, after: TestRun): Verdict {
+function regressionVerdict(before: TestRun, after: TestRun): Verdict {
   if (before.passed) return 'not-red-before'
   if (!after.passed) return 'not-green-after'
   return 'red-to-green'

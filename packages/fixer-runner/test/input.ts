@@ -25,3 +25,12 @@ export function runnerInput(overrides: Partial<RunnerInput> = {}): RunnerInput {
     ...overrides
   }
 }
+
+export const inheritedSecrets = {
+  ANTHROPIC_API_KEY: 'sk-ant-api03-inherited',
+  GITHUB_TOKEN: 'ghp_inherited',
+  DATABASE_URL: 'postgres://ptg:inherited@db.internal/ptg',
+  PTG_RUN_TOKEN: 'ptg-run.inherited'
+}
+
+export const inheritedEnv = { PATH: '/usr/bin', HOME: '/home/ubuntu', ...inheritedSecrets }

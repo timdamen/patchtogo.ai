@@ -5,7 +5,7 @@ import {
   type RunnerResult,
   type TestRun
 } from '@patchtogo/fixer-runner/protocol'
-import type { NetworkPolicy, Sandbox } from '@vercel/sandbox'
+import type { Sandbox } from '@vercel/sandbox'
 import type { FixRequest, FixResult, Fixer, ModelSpend, TestResult } from '../pipeline/ports.ts'
 import {
   check,
@@ -42,7 +42,7 @@ const bashSandboxSetup = [
   'umount /proc/kcore /proc/keys'
 ].join(' && ')
 
-export const runnerCommand = {
+const runnerCommand = {
   cmd: 'setpriv',
   args: [
     '--no-new-privs',
@@ -68,8 +68,6 @@ export interface SandboxFixerOptions {
   sourceArchive: SourceArchive
   models: RunnerInput['models']
   limits: FixerLimits
-  vcpus?: number
-  now?: () => Date
   onLine?: (line: RunnerLine) => void
 }
 
@@ -77,11 +75,7 @@ export function modelTokenTtlMs(limits: Pick<FixerLimits, 'sandboxTimeoutMs'>): 
   return limits.sandboxTimeoutMs + 5 * 60_000
 }
 
-export function egressPolicy(proxyBaseUrl: string): NetworkPolicy {
-  return { allow: [new URL(proxyBaseUrl).hostname, NPM_REGISTRY] }
-}
-
-export function runnerInput(
+function runnerInput(
   request: FixRequest,
   options: Pick<SandboxFixerOptions, 'models' | 'limits'> & { proxyBaseUrl: string }
 ): RunnerInput {
@@ -138,7 +132,7 @@ function spent(totals: ModelSpend, before: ModelSpend): ModelSpend {
   }
 }
 
-export function fixResult(
+function fixResult(
   result: RunnerResult,
   transcript: string,
   sandboxSeconds: number,
@@ -197,35 +191,34 @@ async function collect(
   )
 }
 
+async function provision(sandbox: Sandbox) {
+  await check(sandbox, 'creating directories', 'mkdir', ['-p', ...Object.values(sandboxLayout)])
+  const runner = await runnerPackage()
+  await sandbox.writeFiles(
+    runner.map((file) => ({
+      path: `${sandboxLayout.runner}/${file.path}`,
+      content: file.content
+    }))
+  )
+  await check(sandbox, 'preparing the Bash sandbox', 'sudo', ['bash', '-c', bashSandboxSetup])
+  await check(
+    sandbox,
+    'installing the fixer runner',
+    'npm',
+    [
+      'install',
+      '--omit=dev',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      `--before=${new Date(Date.now() - DAY_MS).toISOString()}`
+    ],
+    sandboxLayout.runner
+  )
+}
+
 export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
   const { credentials, proxyBaseUrl, sourceArchive, limits, onLine } = options
-  const now = options.now ?? (() => new Date())
-
-  async function provision(sandbox: Sandbox) {
-    await check(sandbox, 'creating directories', 'mkdir', ['-p', ...Object.values(sandboxLayout)])
-    const runner = await runnerPackage()
-    await sandbox.writeFiles(
-      runner.map((file) => ({
-        path: `${sandboxLayout.runner}/${file.path}`,
-        content: file.content
-      }))
-    )
-    await check(sandbox, 'preparing the Bash sandbox', 'sudo', ['bash', '-c', bashSandboxSetup])
-    await check(
-      sandbox,
-      'installing the fixer runner',
-      'npm',
-      [
-        'install',
-        '--omit=dev',
-        '--ignore-scripts',
-        '--no-audit',
-        '--no-fund',
-        `--before=${new Date(now().getTime() - DAY_MS).toISOString()}`
-      ],
-      sandboxLayout.runner
-    )
-  }
 
   async function stage(sandbox: Sandbox, request: FixRequest, input: RunnerInput, token: string) {
     await sandbox.writeFiles([
@@ -285,20 +278,21 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
       let sandbox: Sandbox | undefined
       try {
         const input = runnerInput(request, { ...options, proxyBaseUrl })
-        const created = now().getTime()
+        const created = Date.now()
         sandbox = await openSandbox({
           credentials,
           timeoutMs: limits.sandboxTimeoutMs,
-          vcpus: options.vcpus,
           networkPolicy: 'allow-all',
           purpose: 'fixer'
         })
         await provision(sandbox)
-        await sandbox.update({ networkPolicy: egressPolicy(proxyBaseUrl) })
+        await sandbox.update({
+          networkPolicy: { allow: [new URL(proxyBaseUrl).hostname, NPM_REGISTRY] }
+        })
         await stage(sandbox, request, input, request.modelToken)
         const runnerExit = await runRunner(sandbox)
         return await collect(sandbox, request, runnerExit, () =>
-          Math.round((now().getTime() - created) / 1000)
+          Math.round((Date.now() - created) / 1000)
         )
       } finally {
         await sandbox?.stop().catch(() => undefined)

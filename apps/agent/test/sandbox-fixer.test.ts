@@ -1,10 +1,103 @@
-import type { RunnerResult } from '@patchtogo/fixer-runner/protocol'
-import { runnerInputSchema } from '@patchtogo/fixer-runner/protocol'
-import { describe, expect, it } from 'vitest'
+import { runnerInputSchema, type RunnerResult } from '@patchtogo/fixer-runner/protocol'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { describeLine, lineSplitter, parseRunnerLine } from '../src/fixer/runner-lines.ts'
 import { runnerPackage } from '../src/fixer/runner-package.ts'
-import { egressPolicy, fixResult, runnerCommand, runnerInput } from '../src/fixer/sandbox-fixer.ts'
+import { createSandboxFixer } from '../src/fixer/sandbox-fixer.ts'
 import type { FixRequest } from '../src/pipeline/ports.ts'
+
+const sandbox = vi.hoisted(() => {
+  interface Write {
+    path: string
+    content: string
+    mode: number | undefined
+    policy: unknown
+  }
+  interface Run {
+    cmd: string
+    args: string[]
+    detached: boolean
+    policy: unknown
+  }
+  const state = {
+    policy: undefined as unknown,
+    files: new Map<string, Buffer>(),
+    writes: [] as Write[],
+    runs: [] as Run[],
+    stopped: false,
+    runner: { result: undefined as unknown, exitCode: 0, stderr: '', seconds: 0 }
+  }
+
+  function runner() {
+    return {
+      async *logs() {
+        if (state.runner.stderr) yield { stream: 'stderr', data: state.runner.stderr }
+      },
+      async wait() {
+        vi.setSystemTime(Date.now() + state.runner.seconds * 1000)
+        const input = JSON.parse(state.files.get('/vercel/ptg/io/input.json')?.toString() ?? '{}')
+        if (state.runner.result !== undefined) {
+          state.files.set(input.resultPath, Buffer.from(JSON.stringify(state.runner.result)))
+        }
+        return { exitCode: state.runner.exitCode }
+      }
+    }
+  }
+
+  const instance = {
+    async update(params: { networkPolicy: unknown }) {
+      state.policy = params.networkPolicy
+    },
+    async writeFiles(files: { path: string; content: string | Uint8Array; mode?: number }[]) {
+      for (const file of files) {
+        const content = Buffer.from(file.content)
+        state.files.set(file.path, content)
+        state.writes.push({
+          path: file.path,
+          content: content.toString(),
+          mode: file.mode,
+          policy: state.policy
+        })
+      }
+    },
+    async runCommand(params: { cmd: string; args: string[]; detached?: boolean }) {
+      const detached = params.detached === true
+      state.runs.push({ cmd: params.cmd, args: params.args, detached, policy: state.policy })
+      if (detached) return runner()
+      const [flag, archive] = params.args
+      if (params.cmd === 'tar' && flag === '-czf' && archive) {
+        state.files.set(archive, Buffer.from('transcript tarball'))
+      }
+      return { exitCode: 0, output: async () => '', stdout: async () => '' }
+    },
+    async readFileToBuffer(file: { path: string }) {
+      return state.files.get(file.path) ?? null
+    },
+    async stop() {
+      state.stopped = true
+      return {}
+    }
+  }
+
+  return {
+    state,
+    reset() {
+      state.policy = undefined
+      state.files.clear()
+      state.writes = []
+      state.runs = []
+      state.stopped = false
+      state.runner = { result: undefined, exitCode: 0, stderr: '', seconds: 0 }
+    },
+    async create(params: { networkPolicy: unknown }) {
+      state.policy = params.networkPolicy
+      return instance
+    }
+  }
+})
+
+vi.mock('@vercel/sandbox', () => ({ Sandbox: { create: sandbox.create } }))
+
+const runToken = 'ptg-run.eyJydW4iOiJ4In0.c2lnbmF0dXJl'
 
 const request: FixRequest = {
   runId: 'GHSA-p6mc-m468-83gw:lodash.set',
@@ -25,15 +118,9 @@ const request: FixRequest = {
     fixStrategy: 'refuse prototype keys'
   },
   source: { repository: 'patchtogo-ai/lodash.set', branch: 'ptg/base-4.3.2' },
-  modelToken: 'ptg-run.eyJydW4iOiJ4In0.c2lnbmF0dXJl',
+  modelToken: runToken,
   instructions: [],
   untrustedContext: ['a comment']
-}
-
-const settings = {
-  proxyBaseUrl: 'https://agent.patchtogo.ai/model-proxy',
-  models: { lead: 'claude-opus-5-5', subagents: {} },
-  limits: { maxTurns: 80, maxBudgetUsd: 10, testTimeoutMs: 300_000, sandboxTimeoutMs: 2_400_000 }
 }
 
 const finished: RunnerResult = {
@@ -68,6 +155,33 @@ const earlier = {
   outputTokens: 500,
   cacheReadTokens: 20_000,
   cacheWriteTokens: 5000
+}
+
+const resumed: FixRequest = {
+  ...request,
+  resume: {
+    session: { id: finished.sessionId, transcript: 'dGFy', totals: earlier },
+    diff: finished.diff
+  }
+}
+
+const io = {
+  input: '/vercel/ptg/io/input.json',
+  token: '/vercel/ptg/io/token',
+  source: '/vercel/ptg/io/source.tgz',
+  transcript: '/vercel/ptg/io/transcript.tgz'
+}
+
+function written(path: string) {
+  const write = sandbox.state.writes.find((entry) => entry.path === path)
+  if (!write) throw new Error(`${path} was never written`)
+  return write
+}
+
+function runnerRun() {
+  const run = sandbox.state.runs.find((entry) => entry.detached)
+  if (!run) throw new Error('the runner never started')
+  return run
 }
 
 describe('runner JSON lines', () => {
@@ -125,51 +239,98 @@ describe('runner JSON lines', () => {
 })
 
 describe('sandbox fixer', () => {
-  it('limits egress to the model proxy and the npm registry', () => {
-    expect(egressPolicy('https://agent.patchtogo.ai/model-proxy')).toEqual({
-      allow: ['agent.patchtogo.ai', 'registry.npmjs.org']
-    })
+  const fixer = createSandboxFixer({
+    proxyBaseUrl: 'https://agent.patchtogo.test/model-proxy',
+    sourceArchive: async () => new TextEncoder().encode('package source'),
+    models: { lead: 'claude-opus-5-5', subagents: {} },
+    limits: { maxTurns: 80, maxBudgetUsd: 10, testTimeoutMs: 300_000, sandboxTimeoutMs: 2_400_000 }
+  })
+  const fix = (fixRequest: FixRequest = request) => fixer.fix(fixRequest)
+
+  beforeEach(() => {
+    sandbox.reset()
+    sandbox.state.runner.result = finished
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-29T12:00:00Z'))
   })
 
-  it('starts the runner without capabilities or a way to regain them', () => {
-    expect(runnerCommand.cmd).toBe('setpriv')
-    expect(runnerCommand.args).toEqual(
-      expect.arrayContaining([
-        '--no-new-privs',
-        '--inh-caps=-all',
-        '--ambient-caps=-all',
-        '--bounding-set=-all'
-      ])
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('locks egress to the model proxy and npm before it stages the source, input and token', async () => {
+    await fix()
+
+    const locked = { allow: ['agent.patchtogo.test', 'registry.npmjs.org'] }
+    const staged = sandbox.state.writes.filter((write) => write.path.startsWith('/vercel/ptg/io/'))
+    expect(staged.map((write) => write.path).toSorted()).toEqual(
+      [io.input, io.source, io.token].toSorted()
     )
+    for (const write of staged) expect(write.policy).toEqual(locked)
+    expect(runnerRun().policy).toEqual(locked)
   })
 
-  it('passes the runner no credentials besides the path of the run token file', () => {
-    const input = runnerInput(request, settings)
+  it('hands the runner the run token only as a private file named in its input', async () => {
+    await fix()
+
+    const holders = sandbox.state.writes.filter((write) => write.content.includes(runToken))
+    expect(holders.map(({ path, content, mode }) => ({ path, content, mode }))).toEqual([
+      { path: io.token, content: runToken, mode: 0o600 }
+    ])
+    expect(sandbox.state.runs.flatMap((run) => run.args).join(' ')).not.toContain(runToken)
+    const input = JSON.parse(written(io.input).content)
     expect(runnerInputSchema.parse(input)).toEqual(input)
-    const serialised = JSON.stringify(input)
-    expect(serialised).not.toMatch(/sk-ant|ghp_|npm_|postgres:\/\/|ptg-run\./)
-    expect(input.tokenPath).toMatch(/^\/vercel\/ptg\//)
+    expect(input.tokenPath).toBe(io.token)
     expect(input.session.resume).toBe(false)
     expect(input.priorDiff).toBeNull()
   })
 
-  it('resumes the stored session on top of the previous diff', () => {
-    const input = runnerInput(
-      {
-        ...request,
-        resume: {
-          session: { id: finished.sessionId, transcript: 'dGFy', totals: earlier },
-          diff: finished.diff
-        }
-      },
-      settings
-    )
-    expect(input.session).toEqual({ id: finished.sessionId, resume: true })
-    expect(input.priorDiff).toBe(finished.diff)
+  it('starts the shipped runner without capabilities or a way to regain them', async () => {
+    await fix()
+
+    const { cmd, args } = runnerRun()
+    expect({ cmd, args }).toEqual({
+      cmd: 'setpriv',
+      args: [
+        '--no-new-privs',
+        '--inh-caps=-all',
+        '--ambient-caps=-all',
+        '--bounding-set=-all',
+        'node',
+        '/vercel/ptg/runner/src/main.ts',
+        io.input
+      ]
+    })
+    expect(written('/vercel/ptg/runner/src/main.ts').content).toContain('rerunRegression')
   })
 
-  it('reports the deterministic re-run, not the model, as the regression result', () => {
-    const result = fixResult(finished, 'dGFy', 95)
+  it('stops the sandbox when the runner writes no result', async () => {
+    sandbox.state.runner = {
+      result: undefined,
+      exitCode: 1,
+      stderr: 'Error: out of memory',
+      seconds: 0
+    }
+
+    await expect(fix()).rejects.toThrow(
+      'the fixer runner wrote no result (exit 1:\nError: out of memory)'
+    )
+    expect(sandbox.state.stopped).toBe(true)
+  })
+
+  it('resumes the stored session on top of the previous diff', async () => {
+    await fix(resumed)
+
+    const input = JSON.parse(written(io.input).content)
+    expect(input.session).toEqual({ id: finished.sessionId, resume: true })
+    expect(input.priorDiff).toBe(finished.diff)
+    expect(written(io.transcript).content).toBe('tar')
+  })
+
+  it("maps the runner's re-run, usage and concerns into the fix result", async () => {
+    sandbox.state.runner.seconds = 95
+    const result = await fix()
+
     expect(result.regressionBefore.passed).toBe(false)
     expect(result.regressionBefore.output).toContain('(exit 1)')
     expect(result.regressionAfter.passed).toBe(true)
@@ -183,11 +344,16 @@ describe('sandbox fixer', () => {
       cacheWriteTokens: 9000,
       sandboxSeconds: 95
     })
-    expect(result.session).toMatchObject({ id: finished.sessionId, transcript: 'dGFy' })
+    expect(result.session).toMatchObject({
+      id: finished.sessionId,
+      transcript: Buffer.from('transcript tarball').toString('base64')
+    })
   })
 
-  it('charges a resumed session only for what it spent since the stored totals', () => {
-    const result = fixResult(finished, 'dGFy', 40, earlier)
+  it('charges a resumed session only for what it spent since the stored totals', async () => {
+    sandbox.state.runner.seconds = 40
+    const result = await fix(resumed)
+
     expect(result.cost).toEqual({
       usd: 1.5,
       inputTokens: 200,
@@ -199,12 +365,16 @@ describe('sandbox fixer', () => {
     expect(result.session.totals.usd).toBe(2.5)
   })
 
-  it('turns a session without a report into a result that is not red-to-green', () => {
-    const result = fixResult(
-      { ...finished, report: null, regression: null, upstreamTests: null, error: 'budget spent' },
-      'dGFy',
-      95
-    )
+  it('turns a session without a report into a result that is not red-to-green', async () => {
+    sandbox.state.runner.result = {
+      ...finished,
+      report: null,
+      regression: null,
+      upstreamTests: null,
+      error: 'budget spent'
+    }
+    const result = await fix()
+
     expect(result.regressionBefore.passed).toBe(false)
     expect(result.regressionAfter.passed).toBe(false)
     expect(result.summary).toBe('The fix session did not finish: budget spent')

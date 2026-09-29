@@ -3,9 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { taskPrompt } from '../src/agents.ts'
 import { subagentNames, type LeadReport } from '../src/protocol.ts'
 import { outcomeFrom, sessionOptions } from '../src/session.ts'
-import { runnerInput } from './input.ts'
-
-const base = { PATH: '/usr/bin', HOME: '/home/ubuntu' }
+import { inheritedEnv, inheritedSecrets, runnerInput } from './input.ts'
 
 const report: LeadReport = {
   summary: 'Reject __proto__, constructor and prototype path segments.',
@@ -43,7 +41,7 @@ function result(fields: Record<string, unknown>): SDKMessage {
 }
 
 describe('session options', () => {
-  const options = sessionOptions(runnerInput(), 'ptg-run.token', base)
+  const options = sessionOptions(runnerInput(), 'ptg-run.token', inheritedEnv)
 
   it('loads no settings, CLAUDE.md or MCP servers from the fork', () => {
     expect(options.settingSources).toEqual([])
@@ -86,9 +84,9 @@ describe('session options', () => {
       PATH: '/usr/bin',
       HOME: '/home/ubuntu'
     })
-    expect(
-      Object.keys(options.env ?? {}).filter((key) => /KEY|GITHUB|NPM|DATABASE/.test(key))
-    ).toEqual([])
+    expect(Object.keys(options.env ?? {}).filter((key) => key in inheritedSecrets)).toEqual([])
+    const values = Object.values(options.env ?? {})
+    expect(Object.values(inheritedSecrets).filter((secret) => values.includes(secret))).toEqual([])
   })
 
   it('writes the transcript to a fixed project directory under the config dir', () => {
@@ -102,7 +100,7 @@ describe('session options', () => {
     const resumed = sessionOptions(
       runnerInput({ session: { id: '6f1c1f0e-8a8e-4c55-9d7e-0c4a1c2b3d4e', resume: true } }),
       'ptg-run.token',
-      base
+      inheritedEnv
     )
     expect(resumed.resume).toBe('6f1c1f0e-8a8e-4c55-9d7e-0c4a1c2b3d4e')
     expect(resumed.sessionId).toBeUndefined()

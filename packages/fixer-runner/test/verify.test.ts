@@ -2,31 +2,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { TestRun } from '../src/protocol.ts'
-import {
-  Workspace,
-  clip,
-  regressionVerdict,
-  rerunRegression,
-  testEnv,
-  testFilesInside
-} from '../src/verify.ts'
-
-const run = (passed: boolean): TestRun => ({
-  command: 'node --test',
-  exitCode: passed ? 0 : 1,
-  passed,
-  output: ''
-})
-
-describe('regression verdict', () => {
-  it('is red-to-green only when the test fails before and passes after', () => {
-    expect(regressionVerdict(run(false), run(true))).toBe('red-to-green')
-    expect(regressionVerdict(run(true), run(true))).toBe('not-red-before')
-    expect(regressionVerdict(run(false), run(false))).toBe('not-green-after')
-    expect(regressionVerdict(run(true), run(false))).toBe('not-red-before')
-  })
-})
+import { Workspace, clip, rerunRegression, testEnv, testFilesInside } from '../src/verify.ts'
+import { inheritedEnv } from './input.ts'
 
 describe('test output', () => {
   it('keeps the tail of long output', () => {
@@ -41,13 +18,13 @@ describe('regression test files', () => {
     expect(() => testFilesInside('/w', ['../runner/src/main.ts'])).toThrow(/outside the package/)
   })
 
-  it('does not pass the run token to test commands', () => {
-    expect(Object.keys(testEnv({ PATH: '/bin', HOME: '/h' })).toSorted()).toEqual([
-      'CI',
-      'HOME',
-      'LANG',
-      'PATH'
-    ])
+  it('gives test commands only PATH, HOME, LANG and CI', () => {
+    expect(testEnv(inheritedEnv)).toEqual({
+      PATH: '/usr/bin',
+      HOME: '/home/ubuntu',
+      LANG: 'C.UTF-8',
+      CI: '1'
+    })
   })
 })
 
@@ -95,6 +72,19 @@ describe('deterministic re-run', () => {
     const commits = await session(vulnerable)
     const result = await rerunRegression(workspace, commits, test, test.files)
     expect(result.verdict).toBe('not-green-after')
+  })
+
+  it('does not trust a regression test that already passes on the original source', async () => {
+    const commits = await session(fixed)
+    const result = await rerunRegression(
+      workspace,
+      commits,
+      { ...test, command: 'node index.js' },
+      test.files
+    )
+    expect(result.before.passed).toBe(true)
+    expect(result.after.passed).toBe(true)
+    expect(result.verdict).toBe('not-red-before')
   })
 
   it('produces a diff of the fix and the test against the original source', async () => {

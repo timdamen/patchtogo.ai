@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { automationLevels } from './pipeline/automation.ts'
 
 export const aiEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
@@ -33,7 +34,8 @@ export const pipelineEnvSchema = z.object({
     .string()
     .regex(/^[a-z0-9][a-z0-9._-]*$/)
     .default('patchtogo.ai'),
-  PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers')
+  PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers'),
+  PTG_AUTOMATION: z.enum(automationLevels).default('triage-only')
 })
 
 export const githubAppEnvSchema = z

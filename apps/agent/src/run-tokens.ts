@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
+import type { ModelAccess } from './pipeline/ports.ts'
 
 const PREFIX = 'ptg-run'
 
@@ -92,6 +93,15 @@ export function createRunTokens(options: {
     async revoke(token) {
       const claims = decode(token)
       if (claims) await revocations.revoke(claims.tokenId, claims.expiresAt)
+    }
+  }
+}
+
+export function runTokenAccess(tokens: RunTokens, ttlMs: number): ModelAccess {
+  return {
+    async grant(runId) {
+      const { token } = tokens.issue(runId, ttlMs)
+      return { token, revoke: () => tokens.revoke(token) }
     }
   }
 }

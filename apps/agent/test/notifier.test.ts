@@ -57,6 +57,24 @@ describe('the Discord notifier', () => {
     expect(content.trimEnd().endsWith('```')).toBe(true)
   })
 
+  it('announces an opened patch PR with its link', async () => {
+    const api = discord()
+
+    await createDiscordNotifier({ webhookUrl: WEBHOOK, fetch: api.fetch }).notify({
+      type: 'patch-pr-opened',
+      runId: notification.runId,
+      ghsaId: notification.ghsaId,
+      packageName: notification.packageName,
+      url: 'https://github.com/patchtogo-ai/lodash.set/pull/1'
+    })
+
+    const content = String(api.requests[0]?.body.content)
+    expect(content).toContain('Patch PR ready for review')
+    expect(content).toContain('`lodash.set`')
+    expect(content).toContain('<https://github.com/patchtogo-ai/lodash.set/pull/1>')
+    expect(api.requests[0]?.body.allowed_mentions).toEqual({ parse: [] })
+  })
+
   it('fails when Discord refuses the message, so the pipeline records the step as failed', async () => {
     const api = discord(429)
 

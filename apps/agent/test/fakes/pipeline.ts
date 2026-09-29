@@ -1,11 +1,12 @@
 import type { Advisory } from '../../src/advisory.ts'
 import { InMemoryStore } from '../../src/pipeline/memory-store.ts'
+import type { Automation } from '../../src/pipeline/automation.ts'
 import { createPipeline, type PipelineSettings } from '../../src/pipeline/pipeline.ts'
 import type { FixResult, Store } from '../../src/pipeline/ports.ts'
 import type { Triage } from '../../src/triage.ts'
 import { ScriptedBuilder } from './builder.ts'
 import { FakeClock } from './clock.ts'
-import { ScriptedFixer } from './fixer.ts'
+import { RecordingModelAccess, ScriptedFixer } from './fixer.ts'
 import { InMemoryGitHub } from './github.ts'
 import { triageModel } from './model.ts'
 import { RecordingNotifier } from './notifier.ts'
@@ -13,14 +14,16 @@ import { FakeRegistry } from './registry.ts'
 
 interface TestPipelineOptions {
   triage?: (advisory: Advisory) => Triage
-  fixes?: FixResult[]
+  fixes?: (FixResult | Error)[]
   store?: Store
+  automation?: Automation
 }
 
 export const testSettings: PipelineSettings = {
   forkOrg: 'patchtogo-ai',
   npmScope: 'patchtogo.ai',
-  reviewerTeam: 'reviewers'
+  reviewerTeam: 'reviewers',
+  automation: 'fork'
 }
 
 function unexpectedTriage(advisory: Advisory): Triage {
@@ -30,17 +33,24 @@ function unexpectedTriage(advisory: Advisory): Triage {
 export function createTestPipeline({
   triage = unexpectedTriage,
   fixes,
-  store = new InMemoryStore()
+  store = new InMemoryStore(),
+  automation = testSettings.automation
 }: TestPipelineOptions = {}) {
   const ports = {
     github: new InMemoryGitHub(),
     registry: new FakeRegistry(),
     builder: new ScriptedBuilder(),
     fixer: new ScriptedFixer(fixes),
+    modelAccess: new RecordingModelAccess(),
     model: triageModel(triage),
     store,
     notifier: new RecordingNotifier(),
     clock: new FakeClock()
   }
-  return { ...ports, pipeline: createPipeline(ports, testSettings) }
+  const settings = { ...testSettings, automation }
+  return {
+    ...ports,
+    pipeline: createPipeline(ports, settings),
+    withAutomation: (level: Automation) => createPipeline(ports, { ...settings, automation: level })
+  }
 }

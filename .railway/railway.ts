@@ -46,6 +46,7 @@ export default defineRailway(() => {
       PTG_FORK_ORG: 'patchtogo-ai',
       PTG_NPM_SCOPE: 'patchtogo.ai',
       PTG_REVIEWER_TEAM: 'reviewers',
+      PTG_AUTOMATION: 'triage-only',
       PTG_MODEL_PROXY_URL: 'https://agent.patchtogo.ai/model-proxy'
     }
   })

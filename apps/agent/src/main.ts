@@ -12,6 +12,8 @@ import {
   serverEnvSchema
 } from './env.ts'
 import { fixerSettings } from './fixer/config.ts'
+import { describeLine } from './fixer/runner-lines.ts'
+import { createSandboxFixer, modelTokenTtlMs } from './fixer/sandbox-fixer.ts'
 import { npmAdvisoriesUpdatedSince } from './github-advisories.ts'
 import { createGitHubApp, installationOctokit } from './github-app.ts'
 import { createModel } from './model.ts'
@@ -25,12 +27,18 @@ import { createPgPollCursor } from './postgres/poll-cursor.ts'
 import { createPgRevocationStore } from './postgres/revocations.ts'
 import { PostgresStore } from './postgres/store.ts'
 import { createPipelineQueue } from './queue.ts'
-import { createRunTokens } from './run-tokens.ts'
+import type { Fixer } from './pipeline/ports.ts'
+import { createRunTokens, runTokenAccess } from './run-tokens.ts'
 import { createServer } from './server.ts'
 
 const env = serverEnvSchema.parse(process.env)
 const aiEnv = aiEnvSchema.parse(process.env)
 const pipelineEnv = pipelineEnvSchema.parse(process.env)
+const fixerEnv = fixerEnvSchema.parse(process.env)
+const fixerConfig = fixerSettings(fixerEnv)
+if (pipelineEnv.PTG_AUTOMATION === 'full' && !fixerEnv.PTG_MODEL_PROXY_URL) {
+  throw new Error('PTG_AUTOMATION=full needs PTG_MODEL_PROXY_URL for the fixer')
+}
 const githubApi = { token: env.GITHUB_TOKEN }
 const github = createGitHubApp(
   await installationOctokit(githubAppEnvSchema.parse(process.env), pipelineEnv.PTG_FORK_ORG)
@@ -52,15 +60,28 @@ const modelProxy = createModelProxy({
   workspaceId: aiEnv.ANTHROPIC_WORKSPACE_ID
 })
 
+const fixer: Fixer = fixerEnv.PTG_MODEL_PROXY_URL
+  ? createSandboxFixer({
+      ...fixerConfig,
+      proxyBaseUrl: fixerEnv.PTG_MODEL_PROXY_URL,
+      sourceArchive: github.sourceArchive,
+      onLine(line) {
+        const text = describeLine(line)
+        if (text) console.log(`fixer: ${text}`)
+      }
+    })
+  : { fix: () => Promise.reject(new Error('PTG_MODEL_PROXY_URL is not set')) }
+
 const pipeline = createPipeline(
   {
     github,
     registry: createNpmRegistry(),
     builder: createSandboxBuilder({
-      credentials: fixerSettings(fixerEnvSchema.parse(process.env)).credentials,
+      credentials: fixerConfig.credentials,
       sourceArchive: github.sourceArchive
     }),
-    fixer: { fix: () => Promise.reject(new Error('no fixer is configured yet')) },
+    fixer,
+    modelAccess: runTokenAccess(runTokens, modelTokenTtlMs(fixerConfig.limits)),
     model: createModel(aiEnv),
     store: new PostgresStore(postgres.db),
     notifier: env.DISCORD_WEBHOOK_URL
@@ -71,7 +92,8 @@ const pipeline = createPipeline(
   {
     forkOrg: pipelineEnv.PTG_FORK_ORG,
     npmScope: pipelineEnv.PTG_NPM_SCOPE,
-    reviewerTeam: pipelineEnv.PTG_REVIEWER_TEAM
+    reviewerTeam: pipelineEnv.PTG_REVIEWER_TEAM,
+    automation: pipelineEnv.PTG_AUTOMATION
   }
 )
 
@@ -118,7 +140,7 @@ const server = serve(
   { fetch: createServer(webhooks, { modelProxy }).fetch, port: env.PORT },
   ({ port }) => {
     console.log(
-      `patchtogo agent listening on :${port}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
+      `patchtogo agent listening on :${port}, automation ${pipelineEnv.PTG_AUTOMATION}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
     )
   }
 )

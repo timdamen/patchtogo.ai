@@ -1,5 +1,12 @@
 import type { PatchRun } from './patch-run.ts'
-import { StaleRunError, type RunCost, type RunEvent, type RunFilter, type Store } from './ports.ts'
+import {
+  StaleRunError,
+  type FixSession,
+  type RunCost,
+  type RunEvent,
+  type RunFilter,
+  type Store
+} from './ports.ts'
 
 function eventOf(run: PatchRun): RunEvent {
   return {
@@ -16,6 +23,7 @@ export class InMemoryStore implements Store {
   #runs = new Map<string, PatchRun>()
   #events: RunEvent[] = []
   #costs: RunCost[] = []
+  #sessions = new Map<string, FixSession>()
 
   createRunIfAbsent(run: PatchRun): Promise<PatchRun> {
     let stored = this.#runs.get(run.id)
@@ -71,5 +79,16 @@ export class InMemoryStore implements Store {
     return Promise.resolve(
       this.#costs.filter((cost) => cost.runId === runId).map((cost) => structuredClone(cost))
     )
+  }
+
+  saveSession(runId: string, session: FixSession): Promise<void> {
+    if (!this.#runs.has(runId)) return Promise.reject(new Error(`no patch run ${runId}`))
+    this.#sessions.set(runId, structuredClone(session))
+    return Promise.resolve()
+  }
+
+  getSession(runId: string): Promise<FixSession | undefined> {
+    const session = this.#sessions.get(runId)
+    return Promise.resolve(session && structuredClone(session))
   }
 }

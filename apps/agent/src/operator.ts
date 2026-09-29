@@ -17,6 +17,14 @@ export interface Failures {
   blockedAdvisories: string[]
 }
 
+function resumable(run: PatchRun): boolean {
+  return (
+    run.state === 'failed' ||
+    (run.state === 'triaged' && run.triage?.decision === 'patch') ||
+    (run.state === 'fixing' && !run.pullRequest)
+  )
+}
+
 export async function listFailures({ store, queue }: OperatorDeps): Promise<Failures> {
   return {
     runs: await store.listRuns({ state: 'failed' }),
@@ -31,11 +39,11 @@ export async function requestRetry(
   const ghsaId = ghsaIdOf(target)
   let runs: PatchRun[]
   if (target === ghsaId) {
-    runs = await store.listRuns({ ghsaId, state: 'failed' })
+    runs = (await store.listRuns({ ghsaId })).filter(resumable)
   } else {
     const run = await store.getRun(target)
     if (!run) throw new Error(`no patch run ${target}`)
-    runs = run.state === 'failed' ? [run] : []
+    runs = resumable(run) ? [run] : []
   }
 
   const retriedJobs = await queue.retryFailedJobs(ghsaId)

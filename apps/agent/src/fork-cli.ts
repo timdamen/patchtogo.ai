@@ -7,6 +7,7 @@ import { createNpmRegistry } from './npm-registry.ts'
 import { InMemoryStore } from './pipeline/memory-store.ts'
 import { newPatchRun } from './pipeline/patch-run.ts'
 import { createPipeline } from './pipeline/pipeline.ts'
+import { consoleNotifier } from './notifier.ts'
 
 const usage = [
   'usage: pnpm --filter agent fork <npm-package> [--range <vulnerable range>]',
@@ -79,19 +80,19 @@ const pipeline = createPipeline(
       sourceArchive: github.sourceArchive
     }),
     fixer: { fix: () => Promise.reject(new Error('the fork CLI does not fix packages')) },
+    modelAccess: {
+      grant: () => Promise.reject(new Error('the fork CLI does not grant model access'))
+    },
     model: 'triage-is-skipped',
     store,
-    notifier: {
-      async notify(notification) {
-        console.error(`${notification.type}: ${notification.reason}`)
-      }
-    },
+    notifier: consoleNotifier,
     clock: { now: () => new Date() }
   },
   {
     forkOrg: settings.PTG_FORK_ORG,
     npmScope: settings.PTG_NPM_SCOPE,
-    reviewerTeam: settings.PTG_REVIEWER_TEAM
+    reviewerTeam: settings.PTG_REVIEWER_TEAM,
+    automation: 'fork'
   }
 )
 

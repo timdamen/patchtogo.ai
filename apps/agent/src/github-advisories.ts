@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { SecurityAdvisory } from './advisory.ts'
+import { advisoryTypes, type SecurityAdvisory } from './advisory.ts'
 
 export interface GitHubApiOptions {
   token?: string
@@ -15,6 +15,7 @@ const apiUrl = 'https://api.github.com'
 
 const globalAdvisorySchema = z.object({
   ghsa_id: z.string(),
+  type: z.enum(advisoryTypes),
   cve_id: z.string().nullable(),
   summary: z.string(),
   description: z.string().nullable(),
@@ -36,6 +37,7 @@ export function parseGlobalAdvisory(raw: unknown): SecurityAdvisory {
   const advisory = globalAdvisorySchema.parse(raw)
   return {
     ghsaId: advisory.ghsa_id,
+    type: advisory.type,
     cveId: advisory.cve_id,
     summary: advisory.summary,
     description: advisory.description ?? '',

@@ -20,8 +20,11 @@ export interface Vulnerability {
   patchedVersion: string | null
 }
 
+export const advisoryTypes = ['reviewed', 'unreviewed', 'malware'] as const
+
 export interface SecurityAdvisory {
   ghsaId: string
+  type: (typeof advisoryTypes)[number]
   cveId: string | null
   summary: string
   description: string
@@ -30,8 +33,8 @@ export interface SecurityAdvisory {
 }
 
 export function npmAdvisories(advisory: SecurityAdvisory): Advisory[] {
-  const { severity } = advisory
-  if (severity === 'unknown') return []
+  const { type, severity } = advisory
+  if (type === 'malware' || severity === 'unknown') return []
 
   return advisory.vulnerabilities
     .filter((v) => v.ecosystem === 'npm')

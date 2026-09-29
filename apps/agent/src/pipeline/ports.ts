@@ -44,6 +44,7 @@ export interface PublishedVersion {
 
 export interface PublishedPackage {
   name: string
+  latest: string | null
   versions: PublishedVersion[]
 }
 

@@ -1,14 +1,4 @@
-import semver from 'semver'
 import type { RepoRef } from './pipeline/ports.ts'
-
-export function latestVulnerableVersion(
-  versions: string[],
-  vulnerableRange: string
-): string | undefined {
-  const range = semver.validRange(vulnerableRange.replaceAll(',', ' '))
-  if (range === null) return undefined
-  return semver.maxSatisfying(versions, range) ?? undefined
-}
 
 const ownerPattern = '([\\w.-]+)'
 const repoPattern = '([\\w.-]+?)'

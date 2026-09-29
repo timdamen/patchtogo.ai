@@ -120,10 +120,13 @@ describe('advisory poller', () => {
   })
 
   it('creates no duplicate runs when poll windows overlap', async () => {
-    const { pipeline, github, store, model } = createTestPipeline({
+    const { pipeline, github, registry, store, model } = createTestPipeline({
       triage: () => ({ decision: 'skip', reason: 'test', suspectedFiles: [], fixStrategy: '' })
     })
-    for (const { ghsa_id } of listed) github.publishAdvisory(npmAdvisory(ghsa_id))
+    for (const { ghsa_id } of listed) {
+      github.publishAdvisory(npmAdvisory(ghsa_id))
+      registry.publish(ghsa_id.toLowerCase(), '1.0.0')
+    }
     const api = advisoriesApi(listed)
     const advisoryPoller = createAdvisoryPoller({
       updatedSince: (date) => npmAdvisoriesUpdatedSince(date, { fetch: api.fetch }),
@@ -139,11 +142,30 @@ describe('advisory poller', () => {
     expect(await store.listRuns()).toEqual(before)
     expect(model.doGenerateCalls).toHaveLength(3)
   })
+
+  it('creates no runs for a malware advisory', async () => {
+    const { pipeline, github, registry, store, model } = createTestPipeline()
+    const [malware] = listed
+    github.publishAdvisory({ ...npmAdvisory(malware?.ghsa_id ?? ''), type: 'malware' })
+    registry.publish(malware?.ghsa_id.toLowerCase() ?? '', '1.0.0')
+    const api = advisoriesApi(listed.slice(0, 1))
+    const advisoryPoller = createAdvisoryPoller({
+      updatedSince: (date) => npmAdvisoriesUpdatedSince(date, { fetch: api.fetch }),
+      cursor: new InMemoryPollCursor(new Date('2026-09-28T00:00:00Z')),
+      emit: (event) => pipeline.handle(event)
+    })
+
+    await advisoryPoller.poll()
+
+    expect(await store.listRuns()).toEqual([])
+    expect(model.doGenerateCalls).toHaveLength(0)
+  })
 })
 
 function npmAdvisory(ghsaId: string): SecurityAdvisory {
   return {
     ghsaId,
+    type: 'reviewed',
     cveId: null,
     summary: 'Prototype Pollution',
     description: '',
@@ -152,7 +174,7 @@ function npmAdvisory(ghsaId: string): SecurityAdvisory {
       {
         ecosystem: 'npm',
         packageName: ghsaId.toLowerCase(),
-        vulnerableRange: '*',
+        vulnerableRange: '<= 1.0.0',
         patchedVersion: null
       }
     ]

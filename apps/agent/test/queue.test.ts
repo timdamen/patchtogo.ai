@@ -150,12 +150,18 @@ describe('operator retry', { timeout: 30_000 }, () => {
     seedUpstream(github, registry, { name: 'lodash.set', version: '4.3.2' })
     github.publishAdvisory({
       ghsaId: 'GHSA-p6mc-m468-83gw',
+      type: 'reviewed',
       cveId: null,
       summary: 'Prototype Pollution',
       description: 'untrusted',
       severity: 'high',
       vulnerabilities: [
-        { ecosystem: 'npm', packageName: 'lodash.set', vulnerableRange: '*', patchedVersion: null }
+        {
+          ecosystem: 'npm',
+          packageName: 'lodash.set',
+          vulnerableRange: '<= 4.3.2',
+          patchedVersion: null
+        }
       ]
     })
     await queue.work((event) => pipeline.handle(event))

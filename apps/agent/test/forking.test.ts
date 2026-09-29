@@ -21,6 +21,7 @@ const patch: Triage = {
 function advisory(packageNames: string[], vulnerableRange = '<= 1.0.3'): SecurityAdvisory {
   return {
     ghsaId,
+    type: 'reviewed',
     cveId: null,
     summary: 'XSS in escape-html',
     description: 'untrusted advisory text',
@@ -174,6 +175,7 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       for (const version of ['1.0.0', '1.1.0-beta.1', '2.0.0']) {
         test.registry.publish('escape-html', version)
       }
+      test.registry.tagLatest('escape-html', '1.0.3')
 
       const run = await test.run(['escape-html'], '>= 1.0.0, < 2.0.0')
 
@@ -194,12 +196,6 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
 
   describe('needs a human', () => {
     const cases: [string, (test: Awaited<ReturnType<typeof setup>>) => void, RegExp][] = [
-      ['the package is not on npm', () => {}, /npm has no package escape-html/],
-      [
-        'no published version is vulnerable',
-        (test) => seedUpstream(test.github, test.registry, { ...escapeHtml, version: '2.0.0' }),
-        /No published version of escape-html is in the vulnerable range <= 1\.0\.3/
-      ],
       [
         'the release names no repository',
         (test) => test.registry.publish('escape-html', '1.0.3'),
@@ -366,7 +362,7 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       }
       test.github.addRepository(mono, { files, tags: ['@acme/a@1.0.0', '@acme/b@1.0.0'] })
 
-      await test.run(['@acme/a', '@acme/b'], '*')
+      await test.run(['@acme/a', '@acme/b'], '>= 0')
 
       const runs = await test.store.listRuns({ ghsaId })
       expect(runs.map((run) => [run.packageName, run.state, run.fork])).toEqual([

@@ -8,6 +8,7 @@ describe('npm registry', () => {
     const published = parsePackument({
       name: '@acme/strings',
       repository: { type: 'git', url: 'git+https://github.com/acme/tools.git' },
+      'dist-tags': { latest: '2.0.0', next: '3.0.0-beta.1' },
       time: { '1.0.0': '2016-01-01T00:00:00.000Z', '2.0.0': '2020-01-01T00:00:00.000Z' },
       versions: {
         '1.0.0': {
@@ -31,6 +32,7 @@ describe('npm registry', () => {
 
     expect(published).toEqual({
       name: '@acme/strings',
+      latest: '2.0.0',
       versions: [
         {
           version: '1.0.0',
@@ -56,6 +58,15 @@ describe('npm registry', () => {
         }
       ]
     })
+  })
+
+  it('reads an unpublished package as one without a latest version', () => {
+    expect(
+      parsePackument({
+        name: 'left-pad',
+        time: { unpublished: { time: '2016-03-23T00:00:00.000Z', versions: ['1.0.0'] } }
+      })
+    ).toEqual({ name: 'left-pad', latest: null, versions: [] })
   })
 
   it('fetches scoped packages with an encoded slash and treats 404 as unknown', async () => {

@@ -8,7 +8,8 @@ import {
   type ScaffoldingSettings
 } from '../scaffolding.ts'
 import { compareTarballs, describeMismatch } from '../tarball-match.ts'
-import { githubRepository, latestVulnerableVersion, releaseRefs, repoName } from '../upstream.ts'
+import { githubRepository, releaseRefs, repoName } from '../upstream.ts'
+import { parseVulnerableRange } from '../vulnerable-range.ts'
 import type { PatchRun, Step, UpstreamRelease } from './patch-run.ts'
 import type { Ports, PublishedVersion, RepoRef } from './ports.ts'
 
@@ -60,12 +61,13 @@ export function forkingSteps(
 
   async function locateRelease(run: PatchRun): Promise<UpstreamRelease | NeedsHuman> {
     const { packageName, advisory } = run
+    const range = parseVulnerableRange(advisory.vulnerableRange)
+    if (!range) {
+      return { needsHuman: `The vulnerable range ${advisory.vulnerableRange} cannot be parsed.` }
+    }
     const published = await registry.getPackage(packageName)
     if (!published) return { needsHuman: `npm has no package ${packageName}.` }
-    const version = latestVulnerableVersion(
-      published.versions.map((v) => v.version),
-      advisory.vulnerableRange
-    )
+    const version = range.latest(published.versions.map((v) => v.version))
     const release = published.versions.find((v) => v.version === version)
     if (!version || !release) {
       return {

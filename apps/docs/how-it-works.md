@@ -7,7 +7,7 @@ patchtogo is being set up. This page describes the intended flow, not a running 
 ## The flow
 
 1. **Advisory detected.** A new GitHub Security Advisory for an npm package comes in, together with its context: advisory text, affected version range and any upstream discussion.
-2. **Triage.** The agent decides whether a small, behaviour-preserving fix can close the issue. Packages that already have an upstream fix are skipped.
+2. **Triage.** A deterministic check runs first, without a model: a package is only a candidate while its latest version on npm still falls inside the vulnerable range. An advisory without a "first patched version" is not enough, because many of those are stale (newer releases already left the range). Malware advisories are never candidates, and a range the check can't parse goes to a human rather than being guessed. For the remaining packages the agent decides whether a small, behaviour-preserving fix can close the issue.
 3. **Fork and verify.** The package's repository is forked into the [patchtogo-ai](https://github.com/patchtogo-ai) organisation and checked out at the commit of the latest vulnerable release. That commit is built in a sandbox, and its packed files are compared with the published npm tarball, so the patch applies to what users actually run. A package without a public GitHub repository, without a commit or tag for the release, or whose build differs from the tarball goes to a human instead.
 4. **Fix and pull request.** The agent writes the patch and an exploit regression test, then opens a public pull request.
 5. **Preview release.** Every commit on the pull request is published as a preview build. Previews are **unreviewed** and meant as an emergency stopgap.

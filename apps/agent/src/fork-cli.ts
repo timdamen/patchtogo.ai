@@ -17,7 +17,7 @@ const usage = [
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    range: { type: 'string', default: '*' },
+    range: { type: 'string', default: '>= 0' },
     help: { type: 'boolean', default: false }
   }
 })
@@ -59,6 +59,7 @@ const pipeline = createPipeline(
       ...github,
       getAdvisory: async (ghsaId) => ({
         ghsaId,
+        type: 'reviewed',
         cveId: null,
         summary: advisory.summary,
         description: advisory.description,

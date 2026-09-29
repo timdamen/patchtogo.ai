@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import type { PgBoss } from 'pg-boss'
 import type { PipelineEvent } from './pipeline/events.ts'
 import { ghsaIdOf } from './pipeline/patch-run.ts'
@@ -29,6 +30,33 @@ function eventKey(event: PipelineEvent): string {
   }
 }
 
+function sendOrderedIds(): () => string {
+  let lastMs = 0
+  let counter = 0
+  return () => {
+    const now = Date.now()
+    if (now > lastMs) {
+      lastMs = now
+      counter = 0
+    } else if (++counter > 0xfff) {
+      lastMs++
+      counter = 0
+    }
+    const bytes = randomBytes(16)
+    bytes.writeUIntBE(lastMs, 0, 6)
+    bytes.writeUInt16BE(0x7000 | counter, 6)
+    bytes.writeUInt8(0x80 | (bytes.readUInt8(8) & 0x3f), 8)
+    const hex = bytes.toString('hex')
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20)
+    ].join('-')
+  }
+}
+
 export async function createPipelineQueue(
   boss: PgBoss,
   options: PipelineQueueOptions
@@ -53,9 +81,14 @@ export async function createPipelineQueue(
     await boss.createQueue(PIPELINE_QUEUE, { policy: 'key_strict_fifo', ...settings })
   }
 
+  const nextId = sendOrderedIds()
+
   return {
     async send(event) {
-      const id = await boss.send(PIPELINE_QUEUE, event, { singletonKey: eventKey(event) })
+      const id = await boss.send(PIPELINE_QUEUE, event, {
+        id: nextId(),
+        singletonKey: eventKey(event)
+      })
       if (!id) throw new Error(`the pipeline queue refused ${JSON.stringify(event)}`)
     },
     async work(handle) {

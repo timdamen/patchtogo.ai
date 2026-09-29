@@ -19,7 +19,7 @@ interface TestPipelineOptions {
   automation?: Automation
 }
 
-export const testSettings: PipelineSettings = {
+const testSettings: PipelineSettings = {
   forkOrg: 'patchtogo-ai',
   npmScope: 'patchtogo.ai',
   reviewerTeam: 'reviewers',

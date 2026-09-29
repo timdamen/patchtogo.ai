@@ -4,7 +4,7 @@ import type { Advisory } from './advisory.ts'
 import type { Registry } from './pipeline/ports.ts'
 import { parseVulnerableRange } from './vulnerable-range.ts'
 
-export const triageSchema = z.object({
+const triageSchema = z.object({
   decision: z.enum(['patch', 'skip', 'needs-human']),
   reason: z.string(),
   suspectedFiles: z.array(z.string()),
@@ -13,7 +13,7 @@ export const triageSchema = z.object({
 
 export type Triage = z.infer<typeof triageSchema>
 
-export interface TokenUsage {
+interface TokenUsage {
   inputTokens: number
   outputTokens: number
 }

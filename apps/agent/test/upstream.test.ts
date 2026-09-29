@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { rewritePackageJson } from '../src/scaffolding.ts'
 import { githubRepository, releaseRefs } from '../src/upstream.ts'
 
 describe('upstream releases', () => {
@@ -39,28 +38,5 @@ describe('upstream releases', () => {
       'strings@2.1.0',
       'strings-v2.1.0'
     ])
-  })
-
-  it('keeps the indentation and line endings of package.json when renaming', () => {
-    const rewritten = rewritePackageJson('{\r\n\t"name": "foo",\r\n\t"version": "1.0.0"\r\n}', {
-      name: '@patchtogo.ai/foo',
-      version: '1.0.0-ptg.1',
-      repository: { type: 'git', url: 'git+https://github.com/patchtogo-ai/foo.git' }
-    })
-    expect(rewritten).toBe(
-      [
-        '{',
-        '\t"name": "@patchtogo.ai/foo",',
-        '\t"version": "1.0.0-ptg.1",',
-        '\t"repository": {',
-        '\t\t"type": "git",',
-        '\t\t"url": "git+https://github.com/patchtogo-ai/foo.git"',
-        '\t},',
-        '\t"publishConfig": {',
-        '\t\t"access": "public"',
-        '\t}',
-        '}'
-      ].join('\r\n')
-    )
   })
 })

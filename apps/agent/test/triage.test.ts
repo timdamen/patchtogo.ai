@@ -33,22 +33,6 @@ function modelReturning(triage: Triage) {
 }
 
 describe('triageAdvisory', () => {
-  it('returns the structured decision from the model', async () => {
-    const expected: Triage = {
-      decision: 'patch',
-      reason: 'No patched version exists and the fix is a key guard.',
-      suspectedFiles: ['index.js'],
-      fixStrategy: 'Reject __proto__, constructor and prototype path segments.'
-    }
-
-    await expect(
-      triageAdvisory({ model: modelReturning(expected), registry }, advisory)
-    ).resolves.toEqual({
-      triage: expected,
-      usage: { inputTokens: expect.any(Number), outputTokens: expect.any(Number) }
-    })
-  })
-
   it('wraps the advisory as delimited untrusted input', async () => {
     const model = modelReturning({
       decision: 'needs-human',

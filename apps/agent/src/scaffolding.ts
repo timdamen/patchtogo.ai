@@ -51,7 +51,7 @@ function jsonLayout(text: string) {
   return { newline, indent, trailing: /\r?\n$/.test(text) ? newline : '' }
 }
 
-export function rewritePackageJson(
+function rewritePackageJson(
   text: string,
   changes: { name: string; version: string; repository: Record<string, string> }
 ): string {

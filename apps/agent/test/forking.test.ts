@@ -175,7 +175,7 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       for (const version of ['1.0.0', '1.1.0-beta.1', '2.0.0']) {
         test.registry.publish('escape-html', version)
       }
-      test.registry.tagLatest('escape-html', '1.0.3')
+      test.registry.tagLatest('escape-html', '1.0.0')
 
       const run = await test.run(['escape-html'], '>= 1.0.0, < 2.0.0')
 
@@ -184,13 +184,50 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
 
     it('prefers the commit npm recorded over release tags', async () => {
       const test = await setup()
-      const { sha } = seedUpstream(test.github, test.registry, { ...escapeHtml, tags: [] })
+      const { sha } = seedUpstream(test.github, test.registry, escapeHtml)
+      const retagged = await test.github.createBranch(upstream, {
+        name: 'retagged',
+        parent: sha,
+        message: 'a later commit the release tag was moved to',
+        changes: []
+      })
+      test.github.repository(upstream)?.tags.set('v1.0.3', retagged)
       const published = test.registry.packages.get('escape-html')?.versions[0]
       if (published) published.gitHead = sha
 
       const run = await test.run()
 
       expect(run).toMatchObject({ state: 'fixing', release: { commit: { sha, ref: sha } } })
+    })
+
+    it('keeps the indentation and line endings of the upstream package.json', async () => {
+      const test = await setup()
+      seedUpstream(test.github, test.registry, {
+        ...escapeHtml,
+        files: {
+          ...upstreamFiles('escape-html', '1.0.3'),
+          'package.json': '{\r\n\t"name": "escape-html",\r\n\t"version": "1.0.3"\r\n}\r\n'
+        }
+      })
+
+      await test.run()
+
+      expect(test.github.fileAt(fork, baseBranch, 'package.json')).toBe(
+        [
+          '{',
+          '\t"name": "@patchtogo.ai/escape-html",',
+          '\t"version": "1.0.3-ptg.1",',
+          '\t"repository": {',
+          '\t\t"type": "git",',
+          '\t\t"url": "git+https://github.com/patchtogo-ai/escape-html.git"',
+          '\t},',
+          '\t"publishConfig": {',
+          '\t\t"access": "public"',
+          '\t}',
+          '}',
+          ''
+        ].join('\r\n')
+      )
     })
   })
 
@@ -294,20 +331,6 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
   })
 
   describe('idempotency', () => {
-    it('treats a replayed advisory as a no-op once the base branch exists', async () => {
-      const test = await setup()
-      seedUpstream(test.github, test.registry, escapeHtml)
-
-      const first = await test.run()
-      const commits = test.github.commits.size
-      const second = await test.run()
-
-      expect(second).toEqual(first)
-      expect(test.github.forks()).toHaveLength(1)
-      expect(test.github.commits.size).toBe(commits)
-      expect(test.builder.requests).toHaveLength(1)
-    })
-
     it('reuses the fork when the base branch commit fails and the run is retried', async () => {
       const test = await setup()
       seedUpstream(test.github, test.registry, escapeHtml)

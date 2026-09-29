@@ -1,21 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { rewritePackageJson } from '../src/scaffolding.ts'
-import { githubRepository, latestVulnerableVersion, releaseRefs } from '../src/upstream.ts'
+import { githubRepository, releaseRefs } from '../src/upstream.ts'
 
 describe('upstream releases', () => {
-  const versions = ['0.9.0', '1.0.0', '1.0.3', '1.1.0-beta.1', '2.0.0', 'not-semver']
-
-  it.each([
-    ['<= 1.0.3', '1.0.3'],
-    ['>= 1.0.0, < 2.0.0', '1.0.3'],
-    ['= 1.0.0', '1.0.0'],
-    ['*', '2.0.0'],
-    ['>= 3.0.0', undefined],
-    ['not a range', undefined]
-  ])('picks the latest stable version in %s', (range, expected) => {
-    expect(latestVulnerableVersion(versions, range)).toBe(expected)
-  })
-
   it.each([
     ['git+https://github.com/component/escape-html.git', 'component', 'escape-html'],
     ['https://github.com/lodash/lodash', 'lodash', 'lodash'],

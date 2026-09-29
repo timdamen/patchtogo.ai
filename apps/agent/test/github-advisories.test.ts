@@ -4,6 +4,7 @@ import { parseGlobalAdvisory } from '../src/github-advisories.ts'
 
 const raw = {
   ghsa_id: 'GHSA-p6mc-m468-83gw',
+  type: 'reviewed',
   cve_id: 'CVE-2020-8203',
   summary: 'Prototype Pollution in lodash',
   description: 'details',
@@ -31,7 +32,7 @@ describe('parseGlobalAdvisory', () => {
   it('keeps every vulnerability and normalises severity', () => {
     const advisory = parseGlobalAdvisory(raw)
 
-    expect(advisory.severity).toBe('moderate')
+    expect(advisory).toMatchObject({ type: 'reviewed', severity: 'moderate' })
     expect(advisory.vulnerabilities.map((v) => v.packageName)).toEqual([
       'lodash',
       'lodash.set',
@@ -50,5 +51,9 @@ describe('npmAdvisories', () => {
 
   it('drops advisories without a known severity', () => {
     expect(npmAdvisories(parseGlobalAdvisory({ ...raw, severity: 'unknown' }))).toEqual([])
+  })
+
+  it('drops malware advisories', () => {
+    expect(npmAdvisories(parseGlobalAdvisory({ ...raw, type: 'malware' }))).toEqual([])
   })
 })

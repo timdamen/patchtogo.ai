@@ -26,11 +26,11 @@ const triageOutcomes = {
 } as const satisfies Record<Triage['decision'], RunState>
 
 export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
-  const { github, model, store, notifier, clock } = ports
+  const { github, store, notifier, clock } = ports
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
-      const { triage, usage } = await triageAdvisory(model, run.advisory)
+      const { triage, usage } = await triageAdvisory(ports, run.advisory)
       if (usage) {
         await store.recordCost({
           runId: run.id,

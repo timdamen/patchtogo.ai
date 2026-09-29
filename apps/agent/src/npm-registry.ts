@@ -21,6 +21,7 @@ const packumentSchema = z.looseObject({
   name: z.string(),
   repository: repositorySchema.optional().catch(undefined),
   versions: z.record(z.string(), z.unknown()).default({}),
+  'dist-tags': z.record(z.string(), z.string()).optional().catch(undefined),
   time: z.record(z.string(), z.string()).optional().catch(undefined)
 })
 
@@ -54,7 +55,7 @@ export function parsePackument(raw: unknown): PublishedPackage {
       publishedAt: packument.time?.[v.version] ?? null
     })
   }
-  return { name: packument.name, versions }
+  return { name: packument.name, latest: packument['dist-tags']?.latest ?? null, versions }
 }
 
 export interface NpmRegistryOptions {

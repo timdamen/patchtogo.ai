@@ -4,7 +4,8 @@ export class FakeRegistry implements Registry {
   readonly packages = new Map<string, PublishedPackage>()
 
   publish(name: string, version: string, details: Partial<PublishedVersion> = {}): void {
-    const published = this.packages.get(name) ?? { name, versions: [] }
+    const published = this.packages.get(name) ?? { name, latest: null, versions: [] }
+    published.latest = version
     published.versions.push({
       version,
       repository: null,
@@ -18,6 +19,16 @@ export class FakeRegistry implements Registry {
       ...details
     })
     this.packages.set(name, published)
+  }
+
+  tagLatest(name: string, version: string): void {
+    const published = this.packages.get(name)
+    if (!published) throw new Error(`npm has no package ${name}`)
+    published.latest = version
+  }
+
+  unpublish(name: string): void {
+    this.packages.set(name, { name, latest: null, versions: [] })
   }
 
   async getPackage(name: string): Promise<PublishedPackage | undefined> {

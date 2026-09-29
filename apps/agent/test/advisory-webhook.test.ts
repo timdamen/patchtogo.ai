@@ -1,5 +1,6 @@
 import { Webhooks } from '@octokit/webhooks'
 import { describe, expect, it } from 'vitest'
+import type { SecurityAdvisory } from '../src/advisory.ts'
 import { forwardSecurityAdvisories } from '../src/advisory-webhook.ts'
 import type { PipelineEvent } from '../src/pipeline/events.ts'
 import { createServer } from '../src/server.ts'
@@ -65,19 +66,11 @@ describe('security_advisory webhook', () => {
   })
 
   it('creates no duplicate runs when GitHub redelivers the same delivery', async () => {
-    const { pipeline, github, store, model } = createTestPipeline({
+    const { pipeline, github, registry, store, model } = createTestPipeline({
       triage: () => ({ decision: 'skip', reason: 'test', suspectedFiles: [], fixStrategy: '' })
     })
-    github.publishAdvisory({
-      ghsaId,
-      cveId: null,
-      summary: 'Prototype Pollution in lodash.set',
-      description: '',
-      severity: 'high',
-      vulnerabilities: [
-        { ecosystem: 'npm', packageName: 'lodash.set', vulnerableRange: '*', patchedVersion: null }
-      ]
-    })
+    github.publishAdvisory(lodashSetAdvisory('reviewed'))
+    registry.publish('lodash.set', '4.3.2')
     const { deliver } = securityAdvisoryWebhook((event) => pipeline.handle(event))
 
     await deliver('published')
@@ -88,4 +81,36 @@ describe('security_advisory webhook', () => {
     expect(await store.listRuns({ ghsaId })).toEqual(before)
     expect(model.doGenerateCalls).toHaveLength(1)
   })
+
+  it('creates no runs for a malware advisory', async () => {
+    const { pipeline, github, registry, store, model } = createTestPipeline()
+    github.publishAdvisory(lodashSetAdvisory('malware'))
+    registry.publish('lodash.set', '4.3.2')
+    const { deliver } = securityAdvisoryWebhook((event) => pipeline.handle(event))
+
+    const response = await deliver('published')
+
+    expect(response.status).toBe(202)
+    expect(await store.listRuns()).toEqual([])
+    expect(model.doGenerateCalls).toHaveLength(0)
+  })
 })
+
+function lodashSetAdvisory(type: SecurityAdvisory['type']): SecurityAdvisory {
+  return {
+    ghsaId,
+    type,
+    cveId: null,
+    summary: 'Prototype Pollution in lodash.set',
+    description: '',
+    severity: 'high',
+    vulnerabilities: [
+      {
+        ecosystem: 'npm',
+        packageName: 'lodash.set',
+        vulnerableRange: '<= 4.3.2',
+        patchedVersion: null
+      }
+    ]
+  }
+}

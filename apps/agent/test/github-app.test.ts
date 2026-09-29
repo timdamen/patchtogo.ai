@@ -90,9 +90,18 @@ describe('GitHub App adapter', () => {
     expect(polls).toBe(3)
   })
 
-  it('refuses a repository with the fork name that is not a fork of the upstream', async () => {
+  it.each([
+    ['not a fork', { fork: false }],
+    [
+      'a fork of another repository',
+      {
+        parent: { full_name: 'someone/escape-html' },
+        source: { full_name: 'someone/escape-html' }
+      }
+    ]
+  ])('refuses a repository with the fork name that is %s', async (_case, repository) => {
     const { github } = fakeGitHub(
-      on('GET', '/repos/patchtogo-ai/escape-html', 200, { ...forkData, fork: false })
+      on('GET', '/repos/patchtogo-ai/escape-html', 200, { ...forkData, ...repository })
     )
 
     await expect(github.forkRepository(upstream, into)).rejects.toThrow(

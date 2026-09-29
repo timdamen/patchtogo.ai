@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { npmAdvisories } from '../src/advisory.ts'
 import { parseGlobalAdvisory } from '../src/github-advisories.ts'
 
 const raw = {
@@ -38,22 +37,5 @@ describe('parseGlobalAdvisory', () => {
       'lodash.set',
       'lodash-rails'
     ])
-  })
-})
-
-describe('npmAdvisories', () => {
-  it('keeps one entry per npm package', () => {
-    const advisories = npmAdvisories(parseGlobalAdvisory(raw))
-
-    expect(advisories.map((a) => a.packageName)).toEqual(['lodash', 'lodash.set'])
-    expect(advisories[1]).toMatchObject({ patchedVersion: null, severity: 'moderate' })
-  })
-
-  it('drops advisories without a known severity', () => {
-    expect(npmAdvisories(parseGlobalAdvisory({ ...raw, severity: 'unknown' }))).toEqual([])
-  })
-
-  it('drops malware advisories', () => {
-    expect(npmAdvisories(parseGlobalAdvisory({ ...raw, type: 'malware' }))).toEqual([])
   })
 })

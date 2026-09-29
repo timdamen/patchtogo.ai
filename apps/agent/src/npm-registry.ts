@@ -39,7 +39,7 @@ function license(value: License | undefined): string | null {
   return (typeof value === 'string' ? value : value.type) || null
 }
 
-export function parsePackument(raw: unknown): PublishedPackage {
+function parsePackument(raw: unknown): PublishedPackage {
   const packument = packumentSchema.parse(raw)
   const versions: PublishedVersion[] = []
   for (const entry of Object.values(packument.versions)) {
@@ -58,18 +58,16 @@ export function parsePackument(raw: unknown): PublishedPackage {
   return { name: packument.name, latest: packument['dist-tags']?.latest ?? null, versions }
 }
 
+const REGISTRY_URL = 'https://registry.npmjs.org'
+
 export interface NpmRegistryOptions {
-  registryUrl?: string
   fetch?: typeof fetch
 }
 
-export function createNpmRegistry({
-  registryUrl = 'https://registry.npmjs.org',
-  fetch: fetchImpl = fetch
-}: NpmRegistryOptions = {}): Registry {
+export function createNpmRegistry({ fetch: fetchImpl = fetch }: NpmRegistryOptions = {}): Registry {
   return {
     async getPackage(name) {
-      const response = await fetchImpl(`${registryUrl}/${name.replace('/', '%2F')}`, {
+      const response = await fetchImpl(`${REGISTRY_URL}/${name.replace('/', '%2F')}`, {
         headers: { accept: 'application/json' }
       })
       if (response.status === 404) return undefined

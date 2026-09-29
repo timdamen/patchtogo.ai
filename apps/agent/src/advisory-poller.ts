@@ -6,23 +6,6 @@ export interface PollCursor {
   set(value: Date): Promise<void>
 }
 
-export class InMemoryPollCursor implements PollCursor {
-  #value: Date
-
-  constructor(initial: Date) {
-    this.#value = new Date(initial)
-  }
-
-  get(): Promise<Date> {
-    return Promise.resolve(new Date(this.#value))
-  }
-
-  set(value: Date): Promise<void> {
-    this.#value = new Date(value)
-    return Promise.resolve()
-  }
-}
-
 export interface AdvisoryPollerOptions {
   updatedSince(since: Date): AsyncIterable<AdvisoryUpdate[]>
   cursor: PollCursor

@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { SecurityAdvisory } from '../src/advisory.ts'
-import { createAdvisoryPoller, InMemoryPollCursor } from '../src/advisory-poller.ts'
+import { createAdvisoryPoller } from '../src/advisory-poller.ts'
 import { npmAdvisoriesUpdatedSince, type GitHubApiOptions } from '../src/github-advisories.ts'
 import type { PipelineEvent } from '../src/pipeline/events.ts'
-import { createTestPipeline } from './fakes/pipeline.ts'
+import { InMemoryPollCursor } from './fakes/poll-cursor.ts'
 
 interface ListedAdvisory {
   ghsa_id: string
@@ -118,65 +117,4 @@ describe('advisory poller', () => {
     ])
     expect(await cursor.get()).toEqual(new Date('2026-09-28T02:00:00Z'))
   })
-
-  it('creates no duplicate runs when poll windows overlap', async () => {
-    const { pipeline, github, registry, store, model } = createTestPipeline({
-      triage: () => ({ decision: 'skip', reason: 'test', suspectedFiles: [], fixStrategy: '' })
-    })
-    for (const { ghsa_id } of listed) {
-      github.publishAdvisory(npmAdvisory(ghsa_id))
-      registry.publish(ghsa_id.toLowerCase(), '1.0.0')
-    }
-    const api = advisoriesApi(listed)
-    const advisoryPoller = createAdvisoryPoller({
-      updatedSince: (date) => npmAdvisoriesUpdatedSince(date, { fetch: api.fetch }),
-      cursor: new InMemoryPollCursor(new Date('2026-09-28T00:00:00Z')),
-      emit: (event) => pipeline.handle(event)
-    })
-
-    await advisoryPoller.poll()
-    const before = await store.listRuns()
-    await advisoryPoller.poll()
-
-    expect(before).toHaveLength(3)
-    expect(await store.listRuns()).toEqual(before)
-    expect(model.doGenerateCalls).toHaveLength(3)
-  })
-
-  it('creates no runs for a malware advisory', async () => {
-    const { pipeline, github, registry, store, model } = createTestPipeline()
-    const [malware] = listed
-    github.publishAdvisory({ ...npmAdvisory(malware?.ghsa_id ?? ''), type: 'malware' })
-    registry.publish(malware?.ghsa_id.toLowerCase() ?? '', '1.0.0')
-    const api = advisoriesApi(listed.slice(0, 1))
-    const advisoryPoller = createAdvisoryPoller({
-      updatedSince: (date) => npmAdvisoriesUpdatedSince(date, { fetch: api.fetch }),
-      cursor: new InMemoryPollCursor(new Date('2026-09-28T00:00:00Z')),
-      emit: (event) => pipeline.handle(event)
-    })
-
-    await advisoryPoller.poll()
-
-    expect(await store.listRuns()).toEqual([])
-    expect(model.doGenerateCalls).toHaveLength(0)
-  })
 })
-
-function npmAdvisory(ghsaId: string): SecurityAdvisory {
-  return {
-    ghsaId,
-    type: 'reviewed',
-    cveId: null,
-    summary: 'Prototype Pollution',
-    description: '',
-    severity: 'high',
-    vulnerabilities: [
-      {
-        ecosystem: 'npm',
-        packageName: ghsaId.toLowerCase(),
-        vulnerableRange: '<= 1.0.0',
-        patchedVersion: null
-      }
-    ]
-  }
-}

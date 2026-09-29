@@ -2,6 +2,7 @@ import { fromPglite, PgBoss, TestClock } from 'pg-boss'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { listFailures, requestRetry } from '../src/operator.ts'
 import type { PipelineEvent } from '../src/pipeline/events.ts'
+import { newPatchRun } from '../src/pipeline/patch-run.ts'
 import { PostgresStore } from '../src/postgres/store.ts'
 import { createPipelineQueue, type PipelineQueueOptions } from '../src/queue.ts'
 import type { Triage } from '../src/triage.ts'
@@ -233,16 +234,36 @@ describe('operator retry', { timeout: 30_000 }, () => {
     })
   })
 
-  it('does nothing for a run that has not failed and refuses unknown runs', async () => {
+  it('does nothing for a run it cannot resume and refuses unknown runs', async () => {
     const { queue, db } = await startQueue()
     const store = new PostgresStore(db)
-
-    await expect(requestRetry('GHSA-p6mc-m468-83gw:lodash.set', { store, queue })).rejects.toThrow(
-      /no patch run/
-    )
-    expect(await requestRetry('GHSA-p6mc-m468-83gw', { store, queue })).toEqual({
-      retriedJobs: 0,
-      retriedRuns: []
+    const handled: PipelineEvent[] = []
+    await queue.work(async (event) => {
+      handled.push(event)
     })
+    const run = newPatchRun(
+      {
+        ghsaId: 'GHSA-p6mc-m468-83gw',
+        cveId: null,
+        packageName: 'lodash.set',
+        vulnerableRange: '<= 4.3.2',
+        patchedVersion: null,
+        severity: 'high',
+        summary: 'Prototype Pollution',
+        description: 'untrusted'
+      },
+      new Date('2026-09-28T10:00:00Z')
+    )
+    await store.createRunIfAbsent(run)
+    const nothing = { retriedJobs: 0, retriedRuns: [] }
+
+    expect(await requestRetry(run.id, { store, queue })).toEqual(nothing)
+    expect(await requestRetry(run.ghsaId, { store, queue })).toEqual(nothing)
+    await expect(
+      requestRetry('GHSA-p6mc-m468-83gw:lodash.setwith', { store, queue })
+    ).rejects.toThrow(/no patch run/)
+
+    await queue.send(published(run.ghsaId))
+    await vi.waitFor(() => expect(handled).toEqual([published(run.ghsaId)]), waitLong)
   })
 })

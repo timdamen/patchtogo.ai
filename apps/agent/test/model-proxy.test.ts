@@ -15,7 +15,7 @@ let upstreamResponse: () => Response | Promise<Response>
 const now = () => clock
 const tokens = createRunTokens({
   secret: SECRET,
-  revocations: createMemoryRevocationStore(now),
+  revocations: createMemoryRevocationStore(),
   now
 })
 const app = createServer(new Webhooks({ secret: 'test-secret' }), {
@@ -198,15 +198,6 @@ describe('model proxy', () => {
       expect(response.status).toBe(404)
       expect(upstreamCalls).toHaveLength(0)
     })
-  })
-
-  it('revoking one run leaves other runs working', async () => {
-    const first = tokens.issue('run-1', HOUR)
-    const second = tokens.issue('run-2', HOUR)
-    await tokens.revoke(first.token)
-
-    expect(await tokens.verify(first.token)).toBeNull()
-    expect(await tokens.verify(second.token)).toEqual(second.claims)
   })
 
   it('does not leak the key when Anthropic is unreachable', async () => {

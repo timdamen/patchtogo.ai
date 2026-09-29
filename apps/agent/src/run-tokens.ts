@@ -23,11 +23,11 @@ export interface RunTokens {
   revoke(token: string): Promise<void>
 }
 
-export function createMemoryRevocationStore(now: () => number = Date.now): RevocationStore {
+export function createMemoryRevocationStore(): RevocationStore {
   const revoked = new Map<string, number>()
 
   function prune() {
-    const current = now()
+    const current = Date.now()
     for (const [tokenId, expiresAt] of revoked) {
       if (expiresAt <= current) revoked.delete(tokenId)
     }

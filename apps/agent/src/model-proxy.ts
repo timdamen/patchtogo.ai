@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono'
 import type { RunTokens } from './run-tokens.ts'
 
+const ANTHROPIC_API = 'https://api.anthropic.com'
+
 const DROPPED_REQUEST_HEADERS = new Set([
   'authorization',
   'x-api-key',
@@ -33,12 +35,11 @@ export interface ModelProxyOptions {
   tokens: RunTokens
   apiKey: string
   workspaceId?: string
-  upstream?: string
   fetch?: typeof globalThis.fetch
 }
 
 export function createModelProxy(options: ModelProxyOptions) {
-  const { tokens, apiKey, workspaceId, upstream = 'https://api.anthropic.com' } = options
+  const { tokens, apiKey, workspaceId } = options
   const upstreamFetch = options.fetch ?? globalThis.fetch
   const app = new Hono()
 
@@ -59,7 +60,7 @@ export function createModelProxy(options: ModelProxyOptions) {
 
     const method = c.req.method
     const body = method === 'GET' ? undefined : await c.req.arrayBuffer()
-    const target = new URL(path, upstream)
+    const target = new URL(path, ANTHROPIC_API)
     target.search = new URL(c.req.url).search
 
     let response: Response

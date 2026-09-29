@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PGlite } from '@electric-sql/pglite'
 import { describe, expect, it } from 'vitest'
-import { InMemoryPollCursor, type PollCursor } from '../src/advisory-poller.ts'
 import { newPatchRun } from '../src/pipeline/patch-run.ts'
 import { migrate } from '../src/postgres/migrate.ts'
 import { createPgPollCursor } from '../src/postgres/poll-cursor.ts'
@@ -20,8 +19,6 @@ import { freshDatabase } from './support/stores.ts'
 
 const HOUR = 3_600_000
 const SECRET = 'a-run-token-secret-that-is-long-enough'
-
-let clock = 0
 
 describe('migrate', () => {
   it('applies each migration once, in order, and records it', async () => {
@@ -98,13 +95,12 @@ describe('the postgres store', () => {
 })
 
 const revocationStores: [string, () => Promise<RevocationStore>][] = [
-  ['in-memory', async () => createMemoryRevocationStore(() => clock)],
-  ['postgres', async () => createPgRevocationStore((await freshDatabase()).db, () => clock)]
+  ['in-memory', async () => createMemoryRevocationStore()],
+  ['postgres', async () => createPgRevocationStore((await freshDatabase()).db)]
 ]
 
 describe.each(revocationStores)('the %s revocation store', (_name, createRevocations) => {
   it('stops a revoked token and leaves other tokens working', async () => {
-    clock = Date.parse('2026-09-28T10:00:00Z')
     const tokens = createRunTokens({ secret: SECRET, revocations: await createRevocations() })
     const revoked = tokens.issue('GHSA-p6mc-m468-83gw:lodash.set', HOUR)
     const other = tokens.issue('GHSA-p6mc-m468-83gw:lodash.set', HOUR)
@@ -117,13 +113,11 @@ describe.each(revocationStores)('the %s revocation store', (_name, createRevocat
   })
 
   it('forgets revocations once the token has expired anyway', async () => {
-    clock = Date.parse('2026-09-28T10:00:00Z')
     const revocations = await createRevocations()
 
-    await revocations.revoke('old', new Date(clock + HOUR))
+    await revocations.revoke('old', new Date(Date.now() - 1000))
     expect(await revocations.isRevoked('old')).toBe(true)
-    clock += 2 * HOUR
-    await revocations.revoke('new', new Date(clock + HOUR))
+    await revocations.revoke('new', new Date(Date.now() + HOUR))
 
     expect(await revocations.isRevoked('old')).toBe(false)
     expect(await revocations.isRevoked('new')).toBe(true)
@@ -145,21 +139,10 @@ describe('the postgres revocation store', () => {
 
 const lookback = new Date('2026-09-27T10:00:00Z')
 
-const cursors: [string, () => Promise<PollCursor>][] = [
-  ['in-memory', async () => new InMemoryPollCursor(lookback)],
-  [
-    'postgres',
-    async () =>
-      createPgPollCursor((await freshDatabase()).db, {
-        name: 'github-advisories',
-        initial: () => lookback
-      })
-  ]
-]
-
-describe.each(cursors)('the %s poll cursor', (_name, createCursor) => {
+describe('the postgres poll cursor', () => {
   it('starts at the lookback and then follows what was set', async () => {
-    const cursor = await createCursor()
+    const { db } = await freshDatabase()
+    const cursor = createPgPollCursor(db, { name: 'github-advisories', initial: () => lookback })
     expect(await cursor.get()).toEqual(lookback)
 
     await cursor.set(new Date('2026-09-28T09:30:00.123Z'))
@@ -167,9 +150,7 @@ describe.each(cursors)('the %s poll cursor', (_name, createCursor) => {
 
     expect(await cursor.get()).toEqual(new Date('2026-09-28T10:30:00.456Z'))
   })
-})
 
-describe('the postgres poll cursor', () => {
   it('keeps its position across restarts and per name', async () => {
     const { db } = await freshDatabase()
     const initial = () => lookback

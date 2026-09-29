@@ -1,4 +1,4 @@
-import { fromPglite, PgBoss } from 'pg-boss'
+import { fromPglite, PgBoss, TestClock } from 'pg-boss'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { listFailures, requestRetry } from '../src/operator.ts'
 import type { PipelineEvent } from '../src/pipeline/events.ts'
@@ -11,13 +11,14 @@ import { freshDatabase } from './support/stores.ts'
 
 const waitLong = { timeout: 15_000, interval: 50 }
 
-async function startQueue(options: Partial<PipelineQueueOptions> = {}) {
+async function startQueue(options: Partial<PipelineQueueOptions> = {}, clock?: TestClock) {
   const database = await freshDatabase()
   const boss = new PgBoss({
     db: fromPglite(database.pglite),
     backend: 'pglite',
     supervise: false,
-    schedule: false
+    schedule: false,
+    clock
   })
   boss.on('error', (error) => {
     throw error
@@ -71,7 +72,8 @@ describe('the pipeline queue', { timeout: 30_000 }, () => {
   })
 
   it('handles the events of one advisory one at a time, in order', async () => {
-    const { queue } = await startQueue({ concurrency: 3 })
+    const clock = new TestClock()
+    const { queue } = await startQueue({ concurrency: 3 }, clock)
     const handled: PipelineEvent[] = []
     let active = 0
     let peak = 0
@@ -83,14 +85,16 @@ describe('the pipeline queue', { timeout: 30_000 }, () => {
       active--
     })
 
-    const events: PipelineEvent[] = [
+    const events: PipelineEvent[] = [1, 2, 3, 4].flatMap((n): PipelineEvent[] => [
       published('GHSA-p6mc-m468-83gw'),
-      { type: 'retry-requested', runId: 'GHSA-p6mc-m468-83gw:lodash.set' },
-      published('GHSA-p6mc-m468-83gw')
-    ]
+      { type: 'retry-requested', runId: `GHSA-p6mc-m468-83gw:package-${n}` }
+    ])
     for (const event of events) await queue.send(event)
 
-    await vi.waitFor(() => expect(handled).toHaveLength(3), waitLong)
+    await vi.waitFor(async () => {
+      await clock.tick(500)
+      expect(handled).toHaveLength(events.length)
+    }, waitLong)
     expect(handled).toEqual(events)
     expect(peak).toBe(1)
   })

@@ -156,6 +156,8 @@ Following up on a human's merge needs `fork` too, so `PTG_AUTOMATION=triage-only
 
 The sandbox reaches the model only through the agent's model proxy, with a token that is issued for one fix and revoked as soon as the fix ends, whether it succeeded or not. The fix session's transcript is stored in Postgres, outside the sandbox, so a review iteration can resume the same session.
 
+Inside the sandbox the fix session runs Claude Code with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which strips credentials from the environment of the commands the session runs and forces Claude Code's permission mode to `default`, so the runner asks for `default` too. The session is pre-approved for its own tools, and with no one to ask, anything that would still need an approval, such as a write to `.claude/` or `.npmrc`, is refused. That inner sandbox, bubblewrap on Linux, protects files such as `.env*`, `.npmrc`, `.gitmodules`, the lockfiles and `.claude/agents` by mounting over them, and where one doesn't exist yet it leaves an empty file behind as the mount point. The runner removes those empty files from the package root before it records the diff, unless the package already had them; a package whose `.gitignore` doesn't cover them would otherwise get them in its patch. As a second layer, the agent refuses a diff that adds one of them as an empty file.
+
 ## Running the agent service
 
 The agent service is a Fastify server on Node's own HTTP stack. It serves `/health`, the GitHub webhook and the model proxy, and forwards model requests to Anthropic with undici, streaming the response back as it arrives. Cancelling a proxied request, or disconnecting mid-stream, cancels the request to Anthropic too.

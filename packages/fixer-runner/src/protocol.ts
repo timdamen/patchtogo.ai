@@ -150,3 +150,28 @@ const promptTag = new RegExp(`<\\s*(\\/?)\\s*(${promptTags.join('|')})\\b`, 'gi'
 export function tagged(tag: PromptTag, body: string): string {
   return `<${tag}>\n${body.replaceAll(promptTag, '‹$1$2')}\n</${tag}>`
 }
+
+const sandboxPlaceholders = new Set([
+  '.bash_profile',
+  '.bashrc',
+  '.claude/agents',
+  '.claude/commands',
+  '.gitconfig',
+  '.gitmodules',
+  '.idea',
+  '.mcp.json',
+  '.npmrc',
+  '.profile',
+  '.ripgreprc',
+  '.vscode',
+  '.zprofile',
+  '.zshrc',
+  'bunfig.toml',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock'
+])
+
+export function isSandboxPlaceholder(file: string): boolean {
+  return sandboxPlaceholders.has(file) || /^\.(env|yarnrc)[^/]*$/.test(file)
+}

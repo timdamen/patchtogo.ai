@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process'
-import { appendFile, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, lstat, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { LeadReport, RunnerResult, TestRun, UpstreamSuite } from './protocol.ts'
+import {
+  isSandboxPlaceholder,
+  type LeadReport,
+  type RunnerResult,
+  type TestRun,
+  type UpstreamSuite
+} from './protocol.ts'
 import { isInside } from './workdir-guard.ts'
 
 const OUTPUT_LIMIT = 16_000
@@ -98,6 +104,18 @@ export class Workspace {
     await this.git('add', '--all')
     await this.git('commit', '--quiet', '--allow-empty', '--no-verify', '-m', message)
     return (await this.git('rev-parse', 'HEAD')).trim()
+  }
+
+  async snapshotSession(): Promise<{ commit: string; placeholders: string[] }> {
+    const untracked = await this.git('ls-files', '--others', '--exclude-standard', '-z')
+    const placeholders: string[] = []
+    for (const file of untracked.split('\0').filter(isSandboxPlaceholder)) {
+      const stats = await lstat(path.join(this.#workdir, file))
+      if (!stats.isFile() || stats.size > 0) continue
+      await rm(path.join(this.#workdir, file))
+      placeholders.push(file)
+    }
+    return { commit: await this.snapshot('patched by the fix session'), placeholders }
   }
 
   async init(): Promise<string> {

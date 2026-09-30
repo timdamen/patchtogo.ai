@@ -60,8 +60,7 @@ describe('session options', () => {
     expect(options.outputFormat?.schema).not.toHaveProperty('$schema')
   })
 
-  it('pre-approves exactly its own tools and refuses everything else without asking', () => {
-    expect(options.permissionMode).toBe('dontAsk')
+  it('pre-approves exactly its own tools', () => {
     expect(options.allowedTools).toEqual(options.tools)
   })
 

@@ -55,7 +55,8 @@ try {
   event('session-end', outcome.error ?? undefined)
   result = { ...result, ...outcome }
 
-  const patched = await workspace.snapshot('patched by the fix session')
+  const { commit: patched, placeholders } = await workspace.snapshotSession()
+  if (placeholders.length > 0) event('sandbox-placeholders-removed', placeholders.join(' '))
   result.diff = await workspace.diff(base, patched)
 
   if (outcome.report) {

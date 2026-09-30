@@ -9,3 +9,5 @@ dist
 .vitepress/cache
 .vitepress/dist
 .scratch
+.claude/worktrees
+*.pem

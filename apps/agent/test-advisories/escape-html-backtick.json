@@ -1,0 +1,15 @@
+{
+  "ghsa_id": "GHSA-ptg0-dry0-run1",
+  "type": "reviewed",
+  "cve_id": null,
+  "summary": "escape-html does not escape the backtick",
+  "description": "patchtogo test advisory for the end-to-end dry run, not a real vulnerability report.\n\nescape-html escapes &, <, >, \" and ' but leaves the backtick (`) as it is. Older Internet Explorer versions treat a backtick as an attribute delimiter, so escaped output placed in an unquoted attribute value can still break out of it.",
+  "severity": "low",
+  "vulnerabilities": [
+    {
+      "package": { "ecosystem": "npm", "name": "escape-html" },
+      "vulnerable_version_range": "<= 1.0.3",
+      "first_patched_version": null
+    }
+  ]
+}

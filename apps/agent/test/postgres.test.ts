@@ -2,7 +2,6 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { PGlite } from '@electric-sql/pglite'
 import { describe, expect, it } from 'vitest'
 import { newPatchRun } from '../src/pipeline/patch-run.ts'
 import { migrate } from '../src/postgres/migrate.ts'
@@ -14,8 +13,7 @@ import {
   createRunTokens,
   type RevocationStore
 } from '../src/run-tokens.ts'
-import { pgliteDatabase } from './support/pglite.ts'
-import { freshDatabase } from './support/stores.ts'
+import { blankDatabase, freshDatabase } from './support/stores.ts'
 
 const HOUR = 3_600_000
 const SECRET = 'a-run-token-secret-that-is-long-enough'
@@ -29,21 +27,18 @@ describe('migrate', () => {
       'create table log (n int); insert into log values (1);'
     )
     await writeFile(join(directory, 'notes.txt'), 'not a migration')
-    const pglite = await PGlite.create()
-    const db = pgliteDatabase(pglite)
+    const { db } = await blankDatabase()
     const url = pathToFileURL(`${directory}/`)
 
     expect(await migrate(db, url)).toEqual(['0001_first.sql', '0002_second.sql'])
     expect(await migrate(db, url)).toEqual([])
     expect(await db.query('select n from log order by n')).toEqual([{ n: 1 }, { n: 2 }])
-    await pglite.close()
   })
 
   it('rolls a failing migration back and applies it on the next start', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'ptg-migrations-'))
     await writeFile(join(directory, '0001_broken.sql'), 'create table t (n int); select nope;')
-    const pglite = await PGlite.create()
-    const db = pgliteDatabase(pglite)
+    const { db } = await blankDatabase()
     const url = pathToFileURL(`${directory}/`)
 
     await expect(migrate(db, url)).rejects.toThrow()
@@ -51,7 +46,6 @@ describe('migrate', () => {
 
     await writeFile(join(directory, '0001_broken.sql'), 'create table t (n int);')
     expect(await migrate(db, url)).toEqual(['0001_broken.sql'])
-    await pglite.close()
   })
 })
 

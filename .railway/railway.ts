@@ -11,6 +11,7 @@ export default defineRailway(() => {
       buildCommand: 'pnpm --filter agent run --if-present build',
       watchPatterns: [
         '/apps/agent/**',
+        '/packages/fixer-runner/**',
         '/package.json',
         '/pnpm-lock.yaml',
         '/pnpm-workspace.yaml',
@@ -50,7 +51,22 @@ export default defineRailway(() => {
       PTG_NPM_SCOPE: 'patchtogo.ai',
       PTG_REVIEWER_TEAM: 'reviewers',
       PTG_AUTOMATION: 'triage-only',
-      PTG_MODEL_PROXY_URL: 'https://agent.patchtogo.ai/model-proxy'
+      PTG_MODEL_PROXY_URL: 'https://agent.patchtogo.ai/model-proxy',
+      PORT: preserve(),
+      GITHUB_APP_PRIVATE_KEY_PATH: preserve(),
+      PTG_POLL_INTERVAL_MINUTES: preserve(),
+      PTG_POLL_LOOKBACK_HOURS: preserve(),
+      PTG_JOB_TIMEOUT_MINUTES: preserve(),
+      PTG_MODEL_SMALL: preserve(),
+      PTG_MODEL_INVESTIGATOR: preserve(),
+      PTG_MODEL_EXPLOIT_TEST_WRITER: preserve(),
+      PTG_MODEL_PATCH_WRITER: preserve(),
+      PTG_MODEL_VERIFIER: preserve(),
+      PTG_MODEL_DIFF_REVIEWER: preserve(),
+      PTG_FIXER_MAX_TURNS: preserve(),
+      PTG_FIXER_MAX_BUDGET_USD: preserve(),
+      PTG_FIXER_TEST_TIMEOUT_MINUTES: preserve(),
+      PTG_FIXER_TIMEOUT_MINUTES: preserve()
     }
   })
 

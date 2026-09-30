@@ -86,6 +86,7 @@ const pipeline = createPipeline(
       grant: () => Promise.reject(new Error('the fork CLI does not grant model access'))
     },
     model: 'triage-is-skipped',
+    smallModel: 'classification-is-skipped',
     store,
     notifier: consoleNotifier,
     clock: systemClock

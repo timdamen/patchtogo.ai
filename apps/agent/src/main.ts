@@ -96,6 +96,7 @@ const pipeline = createPipeline(
     fixer,
     modelAccess: runTokenAccess(runTokens, modelTokenTtlMs(fixerConfig.limits)),
     model: createModel(aiEnv),
+    smallModel: createModel({ ...aiEnv, PTG_MODEL: fixerEnv.PTG_MODEL_SMALL ?? aiEnv.PTG_MODEL }),
     store,
     notifier: env.DISCORD_WEBHOOK_URL
       ? createDiscordNotifier({ webhookUrl: env.DISCORD_WEBHOOK_URL })

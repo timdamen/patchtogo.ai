@@ -76,7 +76,7 @@ export interface Feedback {
   text: string
 }
 
-export type IterationVerdict = 'push' | 'unchanged' | 'rejected' | 'blocked'
+export type IterationVerdict = 'push' | 'unchanged' | 'rejected' | 'blocked' | 'answered'
 
 export interface Iteration {
   number: number

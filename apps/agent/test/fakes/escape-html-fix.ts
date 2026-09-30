@@ -1,4 +1,5 @@
 import type { SecurityAdvisory } from '../../src/advisory.ts'
+import type { Classification } from '../../src/comment-classification.ts'
 import type { Automation } from '../../src/pipeline/automation.ts'
 import type { FixResult, Store } from '../../src/pipeline/ports.ts'
 import type { Triage } from '../../src/triage.ts'
@@ -108,14 +109,18 @@ export async function setupPatchRun(
   store: Store,
   fixes: (FixResult | Error)[],
   automation: Automation = 'full',
-  { upstreamAccount = false } = {}
+  {
+    upstreamAccount = false,
+    classify
+  }: { upstreamAccount?: boolean; classify?: (comments: string[]) => Classification } = {}
 ) {
   const test = createTestPipeline({
     store,
     triage: () => patch,
     fixes,
     automation,
-    upstreamAccount
+    upstreamAccount,
+    classify
   })
   const upstream = seedUpstream(test.github, test.registry, {
     name: 'escape-html',

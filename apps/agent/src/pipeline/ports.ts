@@ -395,6 +395,7 @@ export interface Ports {
   fixer: Fixer
   modelAccess: ModelAccess
   model: LanguageModel
+  smallModel: LanguageModel
   store: Store
   notifier: Notifier
   clock: Clock

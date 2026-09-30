@@ -3,10 +3,18 @@ import {
   runnerResultSchema,
   type RunnerInput,
   type RunnerResult,
-  type TestRun
+  type TestRun,
+  type UpstreamSuite
 } from '@patchtogo/fixer-runner/protocol'
 import type { Sandbox } from '@vercel/sandbox'
-import type { FixRequest, FixResult, Fixer, ModelSpend, TestResult } from '../pipeline/ports.ts'
+import type {
+  FixRequest,
+  FixResult,
+  Fixer,
+  ModelSpend,
+  TestResult,
+  UpstreamTests
+} from '../pipeline/ports.ts'
 import {
   check,
   NPM_REGISTRY,
@@ -113,6 +121,16 @@ function testResult(run: TestRun | null, fallback: string): TestResult {
   return { passed: run.passed, output: `$ ${run.command}\n(exit ${run.exitCode})\n${run.output}` }
 }
 
+function upstreamTestsOf(suite: UpstreamSuite | null, problem: string): UpstreamTests {
+  if (!suite) return { suite: 'not-run', reason: problem }
+  if (suite.suite === 'none') return suite
+  return {
+    suite: 'ran',
+    before: testResult(suite.before, problem),
+    after: testResult(suite.after, problem)
+  }
+}
+
 const nothingSpent: ModelSpend = {
   usd: 0,
   inputTokens: 0,
@@ -147,9 +165,6 @@ function fixResult(
   }
   const session = { id: result.sessionId, transcript, totals }
   const problem = result.error ?? 'the fix session returned no report'
-  const upstreamTests = result.report?.upstreamTestCommand
-    ? testResult(result.upstreamTests, problem)
-    : { passed: true, output: 'The package has no upstream test suite.' }
   const concerns = result.report?.concerns ?? []
   const summary = result.report
     ? [result.report.summary, ...concerns.map((concern) => `Concern: ${concern}`)].join('\n\n')
@@ -158,7 +173,7 @@ function fixResult(
     diff: result.diff,
     regressionBefore: testResult(result.regression?.before ?? null, problem),
     regressionAfter: testResult(result.regression?.after ?? null, problem),
-    upstreamTests: result.report ? upstreamTests : { passed: false, output: problem },
+    upstreamTests: upstreamTestsOf(result.upstreamTests, problem),
     summary,
     cost: { ...spent(totals, before), sandboxSeconds },
     session

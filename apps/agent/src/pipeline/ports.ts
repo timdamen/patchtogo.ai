@@ -214,6 +214,11 @@ export interface TestResult {
   output: string
 }
 
+export type UpstreamTests =
+  | { suite: 'none'; reason: string }
+  | { suite: 'not-run'; reason: string }
+  | { suite: 'ran'; before: TestResult; after: TestResult }
+
 export interface ModelSpend {
   usd: number
   inputTokens: number
@@ -247,7 +252,7 @@ export interface FixResult {
   diff: string
   regressionBefore: TestResult
   regressionAfter: TestResult
-  upstreamTests: TestResult
+  upstreamTests: UpstreamTests
   summary: string
   cost: FixCost
   session: FixSession

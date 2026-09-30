@@ -8,7 +8,6 @@ import { inheritedEnv, inheritedSecrets, runnerInput } from './input.ts'
 const report: LeadReport = {
   summary: 'Reject __proto__, constructor and prototype path segments.',
   regressionTest: { files: ['test/GHSA-p6mc-m468-83gw.test.js'], command: 'node --test test' },
-  upstreamTestCommand: 'npm test',
   concerns: []
 }
 

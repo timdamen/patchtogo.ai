@@ -1,7 +1,14 @@
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { noUsage, runnerInputSchema, type RunnerEvent, type RunnerResult } from './protocol.ts'
 import { runSession } from './session.ts'
-import { Workspace, clip, rerunRegression, testEnv, testFilesInside } from './verify.ts'
+import {
+  Workspace,
+  clip,
+  rerunRegression,
+  rerunUpstreamSuite,
+  testEnv,
+  testFilesInside
+} from './verify.ts'
 
 function line(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -52,7 +59,7 @@ try {
   result.diff = await workspace.diff(base, patched)
 
   if (outcome.report) {
-    const { regressionTest, upstreamTestCommand } = outcome.report
+    const { regressionTest } = outcome.report
     const testFiles = testFilesInside(input.workdir, regressionTest.files)
     event('regression-rerun')
     result.regression = await rerunRegression(
@@ -61,10 +68,8 @@ try {
       regressionTest,
       testFiles
     )
-    if (upstreamTestCommand) {
-      event('upstream-tests')
-      result.upstreamTests = await workspace.run(upstreamTestCommand)
-    }
+    event('upstream-tests')
+    result.upstreamTests = await rerunUpstreamSuite(workspace, { base, patched })
   }
 } catch (error) {
   result.error = result.error ?? message(error)

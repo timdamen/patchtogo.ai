@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Workspace, clip, rerunRegression, testEnv, testFilesInside } from '../src/verify.ts'
+import {
+  Workspace,
+  clip,
+  rerunRegression,
+  rerunUpstreamSuite,
+  testEnv,
+  testFilesInside
+} from '../src/verify.ts'
 import { inheritedEnv } from './input.ts'
 
 describe('test output', () => {
@@ -106,5 +113,78 @@ describe('deterministic re-run', () => {
     const resumedPatched = await resumed.snapshot('patched')
 
     expect(await resumed.diff(resumedBase, resumedPatched)).toBe(diff)
+  })
+})
+
+describe('upstream test suite', () => {
+  const add = 'module.exports = (a, b) => a + b\n'
+  const suite = 'const add = require("./index.js")\nif (add(1, 2) !== 3) process.exit(1)\n'
+
+  async function workspaceWith(scripts: Record<string, string> | undefined) {
+    const workdir = await mkdtemp(path.join(tmpdir(), 'ptg-suite-'))
+    const manifest = { name: 'add', version: '1.0.0', ...(scripts ? { scripts } : {}) }
+    await writeFile(path.join(workdir, 'package.json'), JSON.stringify(manifest))
+    await writeFile(path.join(workdir, 'index.js'), add)
+    await writeFile(path.join(workdir, 'suite.js'), suite)
+    const workspace = new Workspace(workdir, testEnv(process.env), 60_000)
+    const base = await workspace.init()
+    async function patch(files: Record<string, string>) {
+      for (const [file, content] of Object.entries(files)) {
+        await writeFile(path.join(workdir, file), content)
+      }
+      return { base, patched: await workspace.snapshot('patched') }
+    }
+    return { workdir, workspace, patch }
+  }
+
+  it.each([
+    ['has no test script', undefined, 'has no test script'],
+    [
+      'keeps the test script npm init writes',
+      { test: 'echo "Error: no test specified" && exit 1' },
+      "npm's placeholder"
+    ]
+  ])('records no suite, never a pass, when the package %s', async (_case, scripts, reason) => {
+    const { workdir, workspace, patch } = await workspaceWith(scripts)
+    const commits = await patch({ 'index.js': `${add}// patched\n` })
+
+    const result = await rerunUpstreamSuite(workspace, commits)
+
+    expect(result).toEqual({ suite: 'none', reason: expect.stringContaining(reason) })
+    expect(await readFile(path.join(workdir, 'index.js'), 'utf8')).toContain('// patched')
+  })
+
+  it("runs the base branch's npm test on both trees after a clean install", async () => {
+    const { workdir, workspace, patch } = await workspaceWith({ test: 'node suite.js' })
+    await mkdir(path.join(workdir, 'node_modules'))
+    await writeFile(path.join(workdir, 'node_modules', 'planted.js'), '')
+    const commits = await patch({ 'index.js': 'module.exports = (a, b) => a - b\n' })
+
+    const result = await rerunUpstreamSuite(workspace, commits)
+
+    expect(result).toMatchObject({
+      suite: 'ran',
+      command: 'npm test',
+      before: { passed: true },
+      after: { passed: false, exitCode: 1 }
+    })
+    expect(await readFile(path.join(workdir, 'index.js'), 'utf8')).toContain('a - b')
+    await expect(readFile(path.join(workdir, 'node_modules', 'planted.js'))).rejects.toThrow()
+  })
+
+  it('fails the patched run when the patch changes the package scripts', async () => {
+    const { workspace, patch } = await workspaceWith({ test: 'node suite.js' })
+    const commits = await patch({
+      'index.js': 'module.exports = () => 0\n',
+      'package.json': JSON.stringify({ name: 'add', version: '1.0.0', scripts: { test: 'true' } })
+    })
+
+    const result = await rerunUpstreamSuite(workspace, commits)
+
+    expect(result).toMatchObject({
+      suite: 'ran',
+      before: { passed: true },
+      after: { passed: false, output: expect.stringContaining('changes the scripts') }
+    })
   })
 })

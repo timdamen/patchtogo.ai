@@ -59,10 +59,6 @@ export const leadReportSchema = z.object({
         'Shell command, run from the package root, that exits non-zero while the package is vulnerable and zero once it is fixed.'
       )
   }),
-  upstreamTestCommand: z
-    .string()
-    .nullable()
-    .describe('Shell command that runs the package’s own test suite, or null if it has none.'),
   concerns: z
     .array(z.string())
     .describe('Open findings from the diff review that the reviewers should look at.')
@@ -78,6 +74,18 @@ export const testRunSchema = z.object({
 })
 
 export type TestRun = z.infer<typeof testRunSchema>
+
+export const upstreamSuiteSchema = z.discriminatedUnion('suite', [
+  z.object({ suite: z.literal('none'), reason: z.string() }),
+  z.object({
+    suite: z.literal('ran'),
+    command: z.string(),
+    before: testRunSchema,
+    after: testRunSchema
+  })
+])
+
+export type UpstreamSuite = z.infer<typeof upstreamSuiteSchema>
 
 export const regressionVerdicts = ['red-to-green', 'not-red-before', 'not-green-after'] as const
 
@@ -113,7 +121,7 @@ export const runnerResultSchema = z.object({
       verdict: z.enum(regressionVerdicts)
     })
     .nullable(),
-  upstreamTests: testRunSchema.nullable(),
+  upstreamTests: upstreamSuiteSchema.nullable(),
   usage: usageSchema
 })
 

@@ -3,7 +3,7 @@ import { patchCommitMessage, patchPrBody, patchPrTitle } from '../patch-pr.ts'
 import { DiffError, diffChanges } from '../unified-diff.ts'
 import { repoName } from '../upstream.ts'
 import type { FixOutcome, PatchRun, RunState, Step, Transition } from './patch-run.ts'
-import type { FixRequest, FixResult, Ports, RunCost } from './ports.ts'
+import type { FixRequest, FixResult, Ports, RunCost, UpstreamTests } from './ports.ts'
 import { unprotectedBranch } from './releasing.ts'
 
 export interface FixSettings extends NamingSettings {
@@ -36,6 +36,14 @@ export function outcomeOf(result: FixResult): FixOutcome {
   }
 }
 
+function upstreamSuiteProblem(tests: UpstreamTests): string | undefined {
+  if (tests.suite === 'not-run') return `The upstream test suite did not run: ${tests.reason}`
+  if (tests.suite === 'ran' && tests.before.passed && !tests.after.passed) {
+    return 'The upstream test suite passes on the base branch but fails with the fix.'
+  }
+  return undefined
+}
+
 export function redToGreenProblem(fix: FixOutcome): string | undefined {
   const problems = [
     ...(fix.regressionBefore.passed ? ['passes on the base branch'] : []),
@@ -44,6 +52,8 @@ export function redToGreenProblem(fix: FixOutcome): string | undefined {
   if (problems.length > 0) {
     return `The fixer did not produce a red-to-green regression test: it ${problems.join(' and ')}.`
   }
+  const suite = upstreamSuiteProblem(fix.upstreamTests)
+  if (suite) return suite
   if (!fix.diff.trim()) return 'The fixer reported red-to-green but its diff is empty.'
   return undefined
 }

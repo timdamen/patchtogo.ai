@@ -75,7 +75,11 @@ export function fixResult(overrides: Partial<FixResult> = {}): FixResult {
     diff,
     regressionBefore: { passed: false, output: '$ node test/ghsa.js\n(exit 1)\nnot escaped' },
     regressionAfter: { passed: true, output: '$ node test/ghsa.js\n(exit 0)\n' },
-    upstreamTests: { passed: true, output: '$ npm test\n(exit 0)\n12 passing' },
+    upstreamTests: {
+      suite: 'ran',
+      before: { passed: true, output: '$ npm test\n(exit 0)\n12 passing' },
+      after: { passed: true, output: '$ npm test\n(exit 0)\n13 passing' }
+    },
     summary: 'index.js now escapes < so the payload renders as text.',
     cost: {
       usd: 1.25,

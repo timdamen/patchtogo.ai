@@ -22,6 +22,7 @@ import {
 } from './github-app.ts'
 import { createModel } from './model.ts'
 import { createModelProxy } from './model-proxy.ts'
+import { systemClock } from './clock.ts'
 import { createNpmRegistry } from './npm-registry.ts'
 import { consoleNotifier, createDiscordNotifier } from './notifier.ts'
 import { IllegalTransitionError } from './pipeline/patch-run.ts'
@@ -99,7 +100,7 @@ const pipeline = createPipeline(
     notifier: env.DISCORD_WEBHOOK_URL
       ? createDiscordNotifier({ webhookUrl: env.DISCORD_WEBHOOK_URL })
       : consoleNotifier,
-    clock: { now: () => new Date() },
+    clock: systemClock,
     upstreamAccount: pipelineEnv.PTG_UPSTREAM_TOKEN
       ? createUpstreamAccount(tokenOctokit(pipelineEnv.PTG_UPSTREAM_TOKEN))
       : undefined

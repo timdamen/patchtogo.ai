@@ -119,6 +119,19 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
     })
   })
 
+  it('rechecks npm for a while when the version is not there yet after a successful workflow', async () => {
+    const test = await inReview()
+    const commit = await test.merge()
+    test.clock.onNextSleep(() => test.releaseOnNpm(commit))
+
+    await test.complete(commit, 'success')
+
+    expect(await test.run()).toMatchObject({
+      state: 'released',
+      stable: { commit, version: '1.0.3-ptg.1' }
+    })
+  })
+
   it('fails when a successful workflow left no version on npm, and a retry checks npm again', async () => {
     const test = await inReview()
     const commit = await test.merge()
@@ -129,7 +142,9 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
       state: 'failed',
       failure: {
         step: 'approved',
-        error: expect.stringContaining(`npm shows no version of ${patched} built from ${commit}`)
+        error: expect.stringContaining(
+          `npm still shows no version of ${patched} built from ${commit}`
+        )
       }
     })
 

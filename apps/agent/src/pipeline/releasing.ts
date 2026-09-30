@@ -92,7 +92,17 @@ function firstPublish(run: PatchRun, name: string, fork: RepoRef, branch: string
   ].join('\n')
 }
 
-export function releasingSteps({ registry }: Ports, settings: NamingSettings): { approved: Step } {
+const NPM_RECHECKS_MS = [15_000, 30_000, 60_000, 120_000]
+
+export function releasingSteps(
+  { registry, clock }: Ports,
+  settings: NamingSettings
+): { approved: Step } {
+  async function releaseOf(name: string, commit: string) {
+    const published = await registry.getPackage(name)
+    return { published, version: published?.versions.find((v) => v.gitHead === commit) }
+  }
+
   return {
     async approved(run) {
       const { stable, fork, baseBranch } = run
@@ -100,8 +110,14 @@ export function releasingSteps({ registry }: Ports, settings: NamingSettings): {
         throw new Error(`patch run ${run.id} has no merged patch PR to release`)
       }
       const name = patchedPackageName(run.packageName, settings)
-      const published = await registry.getPackage(name)
-      const version = published?.versions.find((v) => v.gitHead === stable.commit)
+      let { published, version } = await releaseOf(name, stable.commit)
+      if (published && stable.workflow?.conclusion === 'success') {
+        for (const wait of NPM_RECHECKS_MS) {
+          if (version) break
+          await clock.sleep(wait)
+          ;({ published, version } = await releaseOf(name, stable.commit))
+        }
+      }
       if (version) {
         return {
           to: 'released',
@@ -116,7 +132,7 @@ export function releasingSteps({ registry }: Ports, settings: NamingSettings): {
       if (!workflow) return undefined
       if (workflow.conclusion === 'success') {
         throw new Error(
-          `The stable release workflow succeeded (${workflow.url}), but npm shows no version of ${name} built from ${stable.commit}. Either npm hasn't caught up yet, or the workflow's gate found no merged patch PR for that commit and published nothing. Retry the run once the version shows up, or re-run the workflow.`
+          `The stable release workflow succeeded (${workflow.url}), but npm still shows no version of ${name} built from ${stable.commit} after ${NPM_RECHECKS_MS.reduce((sum, wait) => sum + wait, 0) / 60_000} minutes of rechecking. Either npm is unusually slow, or the workflow's gate found no merged patch PR for that commit and published nothing. Retry the run once the version shows up, or re-run the workflow.`
         )
       }
       throw new Error(

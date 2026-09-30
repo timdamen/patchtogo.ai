@@ -385,6 +385,7 @@ export interface Notifier {
 
 export interface Clock {
   now(): Date
+  sleep(milliseconds: number): Promise<void>
 }
 
 export interface Ports {

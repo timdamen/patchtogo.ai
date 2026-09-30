@@ -12,6 +12,10 @@ const optionalString = z
   .optional()
   .transform((value) => value || undefined)
 
+const optionalMegabytes = optionalString.pipe(
+  z.coerce.number<string | undefined>().positive().optional()
+)
+
 export const databaseEnvSchema = z.object({
   DATABASE_URL: z.string().min(1)
 })
@@ -25,7 +29,9 @@ export const serverEnvSchema = databaseEnvSchema.extend({
   PTG_POLL_INTERVAL_MINUTES: z.coerce.number().positive().default(15),
   PTG_POLL_LOOKBACK_HOURS: z.coerce.number().nonnegative().default(24),
   PTG_MAX_CONCURRENT_RUNS: z.coerce.number().int().positive().default(2),
-  PTG_JOB_TIMEOUT_MINUTES: z.coerce.number().positive().default(60)
+  PTG_JOB_TIMEOUT_MINUTES: z.coerce.number().positive().default(60),
+  PTG_WEBHOOK_MAX_MB: optionalMegabytes,
+  PTG_MODEL_PROXY_MAX_MB: optionalMegabytes
 })
 
 export const pipelineEnvSchema = z.object({

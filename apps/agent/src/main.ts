@@ -1,5 +1,4 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import { serve } from '@hono/node-server'
 import { Webhooks } from '@octokit/webhooks'
 import { createAdvisoryPoller } from './advisory-poller.ts'
 import { forwardSecurityAdvisories } from './advisory-webhook.ts'
@@ -30,6 +29,7 @@ import { createPipelineQueue } from './queue.ts'
 import type { Fixer } from './pipeline/ports.ts'
 import { createRunTokens, runTokenAccess } from './run-tokens.ts'
 import { createServer } from './server.ts'
+import { exitGracefully } from './shutdown.ts'
 
 const env = serverEnvSchema.parse(process.env)
 const aiEnv = aiEnvSchema.parse(process.env)
@@ -57,7 +57,8 @@ const runTokens = createRunTokens({
 const modelProxy = createModelProxy({
   tokens: runTokens,
   apiKey: aiEnv.ANTHROPIC_API_KEY,
-  workspaceId: aiEnv.ANTHROPIC_WORKSPACE_ID
+  workspaceId: aiEnv.ANTHROPIC_WORKSPACE_ID,
+  maxRequestBytes: mebibytes(env.PTG_MODEL_PROXY_MAX_MB)
 })
 
 const fixer: Fixer = fixerEnv.PTG_MODEL_PROXY_URL
@@ -136,22 +137,26 @@ async function pollAdvisories(): Promise<void> {
   }
 }
 
-const server = serve(
-  { fetch: createServer(webhooks, { modelProxy }).fetch, port: env.PORT },
-  ({ port }) => {
-    console.log(
-      `patchtogo agent listening on :${port}, automation ${pipelineEnv.PTG_AUTOMATION}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
-    )
-  }
+const server = createServer(webhooks, {
+  modelProxy,
+  webhookMaxBytes: mebibytes(env.PTG_WEBHOOK_MAX_MB),
+  logger: true
+})
+await server.listen({ port: env.PORT, host: '::' })
+server.log.info(
+  `automation ${pipelineEnv.PTG_AUTOMATION}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
 )
 void pollAdvisories()
 
-async function shutdown(signal: string) {
-  console.log(`${signal}: shutting down`)
-  polling.abort()
-  server.close()
-  await postgres.close({ graceful: true, timeoutMs: 20_000 })
-  process.exit(0)
+exitGracefully({
+  deadlineMs: 25_000,
+  log: server.log,
+  async close() {
+    polling.abort()
+    await Promise.all([server.close(), postgres.close({ graceful: true, timeoutMs: 20_000 })])
+  }
+})
+
+function mebibytes(megabytes: number | undefined) {
+  return megabytes === undefined ? undefined : Math.floor(megabytes * 1024 * 1024)
 }
-process.once('SIGTERM', () => void shutdown('SIGTERM'))
-process.once('SIGINT', () => void shutdown('SIGINT'))

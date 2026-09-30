@@ -20,16 +20,18 @@ function securityAdvisoryWebhook() {
 
   async function deliver(action: string, options: { signedBody?: string } = {}) {
     const body = securityAdvisory(action)
-    return app.request('/webhooks/github', {
+    const response = await app.inject({
       method: 'POST',
+      url: '/webhooks/github',
       headers: {
         'x-github-delivery': 'delivery-1',
         'x-github-event': 'security_advisory',
         'x-hub-signature-256': await webhooks.sign(options.signedBody ?? body),
         'content-type': 'application/json'
       },
-      body
+      payload: body
     })
+    return { status: response.statusCode }
   }
 
   return { events, deliver }

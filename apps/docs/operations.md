@@ -73,6 +73,26 @@ Without the environment, the workflow file on any branch of a fork could ask for
 
 A base branch can still be created by anyone with write access. To close that too, add a second organisation ruleset for `refs/heads/ptg/base/**` with only the `creation` rule and the patchtogo GitHub App as its one bypass actor, so only the App can create base branches. Keep it separate from the pull request ruleset, which must stay without bypass actors.
 
+```sh
+gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
+{
+  "name": "patchtogo base branch creation",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": { "include": ["refs/heads/ptg/base/**"], "exclude": [] },
+    "repository_name": { "include": ["~ALL"], "exclude": [] }
+  },
+  "bypass_actors": [
+    { "actor_id": <GitHub App id>, "actor_type": "Integration", "bypass_mode": "always" }
+  ],
+  "rules": [{ "type": "creation" }]
+}
+JSON
+```
+
+Organisation rulesets need the GitHub Team plan (or higher), and the `gh` token needs the `admin:org` scope (`gh auth refresh -h github.com -s admin:org`).
+
 ### GitHub App
 
 It creates the release environment and its branch policy with Administration (read and write), which it already needs to set the default branch and enable Actions on a fork. It reads rules with Metadata, pull request merges with Pull requests and workflow runs with Actions (read). Actions stays read-only on purpose, so the App can't re-run or start a release: re-running a failed release workflow is a human's click, or `gh run rerun <run id> --failed -R patchtogo-ai/<fork>`.

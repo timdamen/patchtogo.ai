@@ -305,6 +305,8 @@ export interface Store {
   listCosts(runId: string): Promise<RunCost[]>
   saveSession(runId: string, session: FixSession): Promise<void>
   getSession(runId: string): Promise<FixSession | undefined>
+  saveTestAdvisory(advisory: SecurityAdvisory): Promise<void>
+  getTestAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
 }
 
 export class StaleRunError extends Error {

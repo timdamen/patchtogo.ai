@@ -2,6 +2,7 @@ import { patchedPackageName, type NamingSettings } from './naming.ts'
 import type { FixOutcome, PatchRun, UpstreamRelease } from './pipeline/patch-run.ts'
 import type { RepoRef, TestResult, UpstreamTests } from './pipeline/ports.ts'
 import { previewInstallUrl } from './preview-workflow.ts'
+import { isTestAdvisory, testMarked } from './test-advisories.ts'
 import type { Triage } from './triage.ts'
 import { repoName } from './upstream.ts'
 
@@ -91,7 +92,22 @@ export function testResultTable(fix: FixOutcome): string[] {
 }
 
 export function patchPrTitle(run: PatchRun, release: UpstreamRelease): string {
-  return `fix: close ${run.ghsaId} in ${run.packageName}@${release.version}`
+  return testMarked(`fix: close ${run.ghsaId} in ${run.packageName}@${release.version}`, run.ghsaId)
+}
+
+export function testBanner(ghsaId: string): string[] {
+  if (!isTestAdvisory(ghsaId)) return []
+  return [
+    '> [!WARNING]',
+    `> **patchtogo test.** ${ghsaId} is a test advisory that a patchtogo operator made up to exercise the pipeline end to end. It is not in the GitHub Advisory Database, and the vulnerability it describes may not exist.`,
+    ''
+  ]
+}
+
+function advisoryLink(ghsaId: string): string {
+  return isTestAdvisory(ghsaId)
+    ? `${ghsaId} (patchtogo test advisory, not in the GitHub Advisory Database)`
+    : `[${ghsaId}](https://github.com/advisories/${encodeURIComponent(ghsaId)})`
 }
 
 export function patchCommitMessage(run: PatchRun, release: UpstreamRelease): string {
@@ -122,6 +138,7 @@ export function patchPrBody({
     ? `[${advisory.cveId}](https://www.cve.org/CVERecord?id=${encodeURIComponent(advisory.cveId)})`
     : 'none'
   return [
+    ...testBanner(run.ghsaId),
     '> [!CAUTION]',
     '> **Unreviewed preview.** This patch was written by an AI agent and has not been reviewed yet.',
     `> Preview builds of this pull request are not approved by the reviewer team: use one only as an emergency stopgap.`,
@@ -139,7 +156,7 @@ export function patchPrBody({
     '',
     '| | |',
     '| --- | --- |',
-    `| Advisory | [${advisory.ghsaId}](https://github.com/advisories/${encodeURIComponent(advisory.ghsaId)}) |`,
+    `| Advisory | ${advisoryLink(advisory.ghsaId)} |`,
     `| CVE | ${cve} |`,
     `| Severity | ${advisory.severity} |`,
     `| Package | ${code(run.packageName)}, vulnerable range ${code(advisory.vulnerableRange ?? 'unknown')} |`,
@@ -151,7 +168,9 @@ export function patchPrBody({
         ]
       : []),
     '',
-    'The advisory text below comes from the GitHub Advisory Database and is shown verbatim.',
+    isTestAdvisory(advisory.ghsaId)
+      ? 'The advisory text below comes from the test advisory and is shown verbatim.'
+      : 'The advisory text below comes from the GitHub Advisory Database and is shown verbatim.',
     '',
     fenced(advisory.summary),
     '',

@@ -1,7 +1,7 @@
 import { npmAdvisories } from '../advisory.ts'
 import { patchedPackageName } from '../naming.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
-import type { Automation } from './automation.ts'
+import { holdFor, type Automation, type AutomationSettings } from './automation.ts'
 import { sameRepository } from '../upstream.ts'
 import type {
   PipelineEvent,
@@ -15,11 +15,13 @@ import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
 import { reviewLoop } from './review.ts'
 import {
+  annotate,
   IllegalTransitionError,
   isTerminal,
   retry,
   transition,
   type PatchRun,
+  type RunDetails,
   type RunState,
   type Step,
   type Transition
@@ -33,9 +35,7 @@ export interface Pipeline {
   handle(event: PipelineEvent): Promise<void>
 }
 
-export interface PipelineSettings extends ForkSettings {
-  automation: Automation
-}
+export type PipelineSettings = ForkSettings & AutomationSettings
 
 const triageOutcomes = {
   patch: 'forking',
@@ -47,10 +47,26 @@ const releaseStates: readonly RunState[] = ['approved', 'failed', 'needs-human']
 
 export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
   const { github, store, notifier, clock } = ports
-  const review = reviewLoop(ports, settings)
+  const review = reviewLoop(ports, settings, held)
   const supersededBy = supersedingCheck(ports, settings)
   const coverage = securityCoverage(ports, settings)
   const releasing = releasingSteps(ports, settings)
+  const forking = forkingSteps(ports, settings)
+  const fixing = fixingSteps(ports, settings)
+  const upstreaming = upstreamingSteps(ports, settings)
+
+  async function held(run: PatchRun, action: string, needs: Automation): Promise<boolean> {
+    const hold = holdFor(run.packageName, action, needs, settings)
+    if (!hold) return false
+    if (run.held?.reason !== hold.reason) {
+      await save({ ...annotate(run, { held: hold }, clock.now()), reason: hold.reason })
+    }
+    return true
+  }
+
+  function gated(action: string, needs: Automation, step: Step): Step {
+    return async (run) => ((await held(run, action, needs)) ? undefined : step(run))
+  }
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
@@ -80,14 +96,15 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     async triaged(run) {
       if (!run.triage) throw new Error(`patch run ${run.id} has no triage`)
       const to = triageOutcomes[run.triage.decision]
-      if (to === 'forking' && settings.automation === 'triage-only') return undefined
+      if (to === 'forking' && (await held(run, 'forking', 'fork'))) return undefined
       return { to, reason: run.triage.reason }
     },
-    ...forkingSteps(ports, settings),
-    ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {}),
+    forking: gated('forking', 'fork', forking.forking),
+    verifying: gated('verifying', 'fork', forking.verifying),
+    fixing: gated('the fix and the patch pull request', 'full', fixing.fixing),
     'in-review': review.step,
-    approved: coverage.reportOnRelease(releasing.approved),
-    ...(settings.automation === 'full' ? upstreamingSteps(ports, settings) : {})
+    approved: gated('the release', 'fork', coverage.reportOnRelease(releasing.approved)),
+    released: gated('the upstream pull request', 'full', upstreaming.released)
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {
@@ -127,6 +144,11 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
       if (!(await save(updated))) return
       current = updated
     }
+  }
+
+  async function annotated(run: PatchRun, details: Partial<RunDetails>): Promise<PatchRun> {
+    const updated = annotate(run, details, clock.now())
+    return (await save(updated)) ? updated : run
   }
 
   async function move(run: PatchRun, next: Transition): Promise<void> {
@@ -228,12 +250,17 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     for (const packageAdvisory of npmAdvisories(advisory)) {
       if (isPatchedPackage(packageAdvisory.packageName, settings)) continue
       const covered = await coverage.check(packageAdvisory)
+      let run = await store.createRunIfAbsent(coverage.newRun(covered, clock.now()))
       try {
-        await coverage.report(covered)
+        const hold = holdFor(run.packageName, 'the repository advisory', 'fork', settings)
+        const record = await coverage.report(covered, hold)
+        if (record && JSON.stringify(record) !== JSON.stringify(run.repositoryAdvisory)) {
+          run = await annotated(run, { repositoryAdvisory: record })
+        }
       } catch (error) {
         failures.push(error)
       }
-      await advance(await store.createRunIfAbsent(coverage.newRun(covered, clock.now())))
+      await advance(run)
     }
     if (failures.length > 0) throw failures[0]
   }

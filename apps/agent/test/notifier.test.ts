@@ -131,6 +131,18 @@ describe('the Discord notifier', () => {
     for (const text of expected) expect(content).toContain(text)
   })
 
+  it('marks every message about a test advisory as a patchtogo test', async () => {
+    const api = discord()
+    const notifier = createDiscordNotifier({ webhookUrl: WEBHOOK, fetch: api.fetch })
+
+    await notifier.notify({ ...notification, ghsaId: 'GHSA-ptg0-dry0-run1' })
+    await notifier.notify(notification)
+
+    const contents = api.requests.map((request) => String(request.body.content))
+    expect(contents[0]).toMatch(/^\[patchtogo test\] \*\*Needs a human:\*\*/)
+    expect(contents[1]).toMatch(/^\*\*Needs a human:\*\*/)
+  })
+
   it('fails when Discord refuses the message, so the pipeline records the step as failed', async () => {
     const api = discord(429)
 

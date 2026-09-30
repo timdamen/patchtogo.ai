@@ -1,9 +1,12 @@
 import type { SecurityAdvisory } from '../../src/advisory.ts'
 import type { Classification } from '../../src/comment-classification.ts'
 import type { Automation } from '../../src/pipeline/automation.ts'
+import type { Pipeline } from '../../src/pipeline/pipeline.ts'
 import type { FixResult, Store } from '../../src/pipeline/ports.ts'
 import type { Triage } from '../../src/triage.ts'
+import type { InMemoryGitHub } from './github.ts'
 import { createTestPipeline } from './pipeline.ts'
+import type { FakeRegistry } from './registry.ts'
 import { seedUpstream } from './upstream.ts'
 
 export const ghsaId = 'GHSA-gxr4-xjj5-5px2'
@@ -132,4 +135,33 @@ export async function setupPatchRun(
   const retry = () => test.pipeline.handle({ type: 'retry-requested', runId })
   const run = () => test.store.getRun(runId)
   return { ...test, upstream, publish, retry, run }
+}
+
+export async function releasePatchPr(
+  test: { github: InMemoryGitHub; registry: FakeRegistry; pipeline: Pipeline },
+  number: number,
+  head: string,
+  version: string
+): Promise<string> {
+  const commit = test.github.mergePullRequest(fork, number)
+  await test.pipeline.handle({
+    type: 'pull-request-closed',
+    pullRequest: { repository: fork, number, head },
+    mergeCommit: commit
+  })
+  test.registry.publish('@patchtogo.ai/escape-html', version, { gitHead: commit })
+  await test.pipeline.handle({
+    type: 'stable-release-completed',
+    repository: fork,
+    headRepository: fork,
+    trigger: 'push',
+    branch: baseBranch,
+    commit,
+    workflowRun: {
+      id: number,
+      url: `https://github.com/${fork.owner}/actions/runs/${number}`,
+      conclusion: 'success'
+    }
+  })
+  return commit
 }

@@ -38,6 +38,7 @@ import type { Fixer } from './pipeline/ports.ts'
 import { createRunTokens, runTokenAccess } from './run-tokens.ts'
 import { createServer } from './server.ts'
 import { exitGracefully } from './shutdown.ts'
+import { withTestAdvisories } from './test-advisories.ts'
 import { createUpstreamWatch } from './upstream-watch.ts'
 
 const env = serverEnvSchema.parse(process.env)
@@ -87,7 +88,7 @@ const store = new PostgresStore(postgres.db)
 
 const pipeline = createPipeline(
   {
-    github,
+    github: withTestAdvisories(github, store),
     registry,
     builder: createSandboxBuilder({
       credentials: fixerConfig.credentials,
@@ -110,7 +111,8 @@ const pipeline = createPipeline(
     forkOrg: pipelineEnv.PTG_FORK_ORG,
     npmScope: pipelineEnv.PTG_NPM_SCOPE,
     reviewerTeam: pipelineEnv.PTG_REVIEWER_TEAM,
-    automation: pipelineEnv.PTG_AUTOMATION
+    automation: pipelineEnv.PTG_AUTOMATION,
+    automationPackages: pipelineEnv.PTG_AUTOMATION_PACKAGES
   }
 )
 
@@ -163,8 +165,12 @@ const server = createServer(webhooks, {
   logger: true
 })
 await server.listen({ port: env.PORT, host: '::' })
+const automationScope =
+  pipelineEnv.PTG_AUTOMATION_PACKAGES.length > 0
+    ? ` for ${pipelineEnv.PTG_AUTOMATION_PACKAGES.join(', ')} and triage-only for every other package`
+    : ''
 server.log.info(
-  `automation ${pipelineEnv.PTG_AUTOMATION}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
+  `automation ${pipelineEnv.PTG_AUTOMATION}${automationScope}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
 )
 void repeat('advisory poll', async () => `${await poller.poll()} advisories`)
 void repeat('upstream watch', async () => `${await upstreamWatch.check()} released packages`)

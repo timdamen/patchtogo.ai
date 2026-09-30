@@ -26,14 +26,23 @@ try {
   })
 
   if (!target) {
-    const { runs, blockedAdvisories } = await listFailures({ store, queue })
+    const { runs, held, blockedAdvisories } = await listFailures({ store, queue })
     for (const run of runs) {
       console.log(`${run.id}\tfailed at ${run.failure?.step}: ${run.failure?.error}`)
+    }
+    for (const run of held) {
+      const reasons = [
+        run.held?.reason,
+        run.repositoryAdvisory?.status === 'held' ? run.repositoryAdvisory.reason : undefined
+      ].filter(Boolean)
+      console.log(`${run.id}\theld in ${run.state}: ${reasons.join(' ')}`)
     }
     for (const ghsaId of blockedAdvisories) {
       console.log(`${ghsaId}\tqueue job failed, later events for it wait`)
     }
-    if (runs.length === 0 && blockedAdvisories.length === 0) console.log('nothing has failed')
+    if (runs.length + held.length + blockedAdvisories.length === 0) {
+      console.log('nothing has failed or is held')
+    }
   } else {
     const { retriedJobs, retriedRuns } = await requestRetry(target, { store, queue })
     for (const runId of retriedRuns) console.log(`queued a retry of ${runId}`)

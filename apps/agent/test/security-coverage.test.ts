@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SecurityAdvisory } from '../src/advisory.ts'
+import { injectTestAdvisory, requestRetry } from '../src/operator.ts'
+import type { PipelineEvent } from '../src/pipeline/events.ts'
 import type { FixResult } from '../src/pipeline/ports.ts'
 import {
   advisory as firstAdvisory,
@@ -9,6 +11,7 @@ import {
   fixResult,
   fork,
   patchBranch,
+  releasePatchPr,
   runId as firstRunId,
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
@@ -54,29 +57,8 @@ describe.each(stores)('security coverage on the %s store', (_name, createStore) 
     test.registry.publish(patched, '0.0.0-ptg.0')
     await test.publish()
 
-    async function release(number: number, head: string, version: string): Promise<string> {
-      const commit = test.github.mergePullRequest(fork, number)
-      await test.pipeline.handle({
-        type: 'pull-request-closed',
-        pullRequest: { repository: fork, number, head },
-        mergeCommit: commit
-      })
-      test.registry.publish(patched, version, { gitHead: commit })
-      await test.pipeline.handle({
-        type: 'stable-release-completed',
-        repository: fork,
-        headRepository: fork,
-        trigger: 'push',
-        branch: baseBranch,
-        commit,
-        workflowRun: {
-          id: number,
-          url: `https://github.com/${fork.owner}/actions/runs/${number}`,
-          conclusion: 'success'
-        }
-      })
-      return commit
-    }
+    const release = (number: number, head: string, version: string) =>
+      releasePatchPr(test, number, head, version)
 
     async function announce(advisory: SecurityAdvisory) {
       test.github.publishAdvisory(advisory)
@@ -228,6 +210,82 @@ describe.each(stores)('security coverage on the %s store', (_name, createStore) 
     expect(test.github.repositoryAdvisories).toEqual([])
     expect(test.advisoryNotifications()).toEqual([])
     expect((await test.laterRun())?.basedOn).toBeUndefined()
+  })
+
+  it('records the advisory it would publish for a test advisory instead of publishing one', async () => {
+    const test = await afterFirstRelease([laterFix])
+    const testGhsa = 'GHSA-ptg0-cov0-0001'
+    const queue = { send: (event: PipelineEvent) => test.pipeline.handle(event) }
+
+    await injectTestAdvisory(
+      {
+        ghsa_id: testGhsa,
+        type: 'reviewed',
+        cve_id: null,
+        summary: 'escape-html leaves > unescaped',
+        description: 'A made-up second XSS in escape-html.',
+        severity: 'high',
+        vulnerabilities: [
+          {
+            package: { ecosystem: 'npm', name: 'escape-html' },
+            vulnerable_version_range: '<= 1.0.3',
+            first_patched_version: null
+          }
+        ]
+      },
+      ['escape-html'],
+      { store: test.store, queue }
+    )
+    await test.release(2, `ptg/patch/escape-html/1.0.3/${testGhsa.toLowerCase()}`, '1.0.3-ptg.2')
+
+    expect(test.github.repositoryAdvisories).toEqual([])
+    expect(test.advisoryNotifications()).toEqual([])
+    expect(await test.store.getRun(`${testGhsa}:escape-html`)).toMatchObject({
+      state: 'released',
+      repositoryAdvisory: {
+        status: 'dry-run',
+        repository: fork,
+        advisory: {
+          summary: `${testGhsa} in escape-html also affects ${patched}`,
+          vulnerabilities: [
+            { packageName: patched, range: '>= 1.0.3-ptg.1, < 1.0.3-ptg.2', patched: '1.0.3-ptg.2' }
+          ]
+        }
+      }
+    })
+  })
+
+  it('holds the advisory of a package taken off PTG_AUTOMATION_PACKAGES until the operator retries it', async () => {
+    const test = await afterFirstRelease([laterFix])
+    test.github.publishAdvisory(laterAdvisory('<= 1.0.3'))
+
+    await test
+      .withAutomation('full', ['html-escaper'])
+      .handle({ type: 'advisory-published', ghsaId: laterGhsa })
+
+    expect(test.github.repositoryAdvisories).toEqual([])
+    expect(await test.laterRun()).toMatchObject({
+      state: 'triaged',
+      held: { action: 'forking' },
+      repositoryAdvisory: { status: 'held' }
+    })
+
+    await requestRetry(laterGhsa, {
+      store: test.store,
+      queue: {
+        send: (event: PipelineEvent) => test.pipeline.handle(event),
+        retryFailedJobs: async () => 0,
+        failedKeys: async () => []
+      }
+    })
+
+    expect(test.github.repositoryAdvisories).toEqual([
+      expect.objectContaining({ state: 'published' })
+    ])
+    expect(await test.laterRun()).toMatchObject({
+      state: 'in-review',
+      repositoryAdvisory: { status: 'published', url: test.github.repositoryAdvisories[0]?.url }
+    })
   })
 
   it("ignores advisories on patchtogo's own packages", async () => {

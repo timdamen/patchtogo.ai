@@ -95,7 +95,8 @@ const pipeline = createPipeline(
     forkOrg: settings.PTG_FORK_ORG,
     npmScope: settings.PTG_NPM_SCOPE,
     reviewerTeam: settings.PTG_REVIEWER_TEAM,
-    automation: 'fork'
+    automation: 'fork',
+    automationPackages: []
   }
 )
 

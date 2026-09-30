@@ -42,6 +42,17 @@ export const pipelineEnvSchema = z.object({
     .default('patchtogo.ai'),
   PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers'),
   PTG_AUTOMATION: z.enum(automationLevels).default('triage-only'),
+  PTG_AUTOMATION_PACKAGES: z
+    .string()
+    .optional()
+    .transform((text) => [
+      ...new Set(
+        (text ?? '')
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean)
+      )
+    ]),
   PTG_UPSTREAM_TOKEN: optionalString
 })
 

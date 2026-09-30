@@ -1,6 +1,7 @@
 import { patchedPackageName, type NamingSettings } from '../naming.ts'
 import { CODEOWNERS_FILE } from '../scaffolding.ts'
 import { RELEASE_ENVIRONMENT, STABLE_WORKFLOW_NAME } from '../stable-workflow.ts'
+import { isTestAdvisory } from '../test-advisories.ts'
 import { repoName } from '../upstream.ts'
 import type { PatchRun, Step } from './patch-run.ts'
 import type { GitHub, Ports, RepoRef, ReviewRule } from './ports.ts'
@@ -92,6 +93,11 @@ function firstPublish(run: PatchRun, name: string, fork: RepoRef, branch: string
   ].join('\n')
 }
 
+function testRelease(run: PatchRun, release: string): string {
+  if (!isTestAdvisory(run.ghsaId)) return ''
+  return ` ${run.ghsaId} is a patchtogo test advisory, so this is a test release: once the test is over, deprecate it with npm deprecate '${release}' 'patchtogo test release, not a security fix'`
+}
+
 const NPM_RECHECKS_MS = [15_000, 30_000, 60_000, 120_000]
 
 export function releasingSteps(
@@ -119,9 +125,10 @@ export function releasingSteps(
         }
       }
       if (version) {
+        const release = `${name}@${version.version}`
         return {
           to: 'released',
-          reason: `Published ${name}@${version.version} from ${stable.commit}.`,
+          reason: `Published ${release} from ${stable.commit}.${testRelease(run, release)}`,
           details: { stable: { ...stable, version: version.version } }
         }
       }

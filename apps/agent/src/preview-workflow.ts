@@ -1,15 +1,14 @@
-import { buildEnv, buildScript } from './builder/build-script.ts'
+import { buildEnv } from './builder/build-script.ts'
 import { PATCH_BRANCH_PREFIX } from './naming.ts'
 import type { RepoRef } from './pipeline/ports.ts'
 import { repoName } from './upstream.ts'
 import {
-  actions,
-  actionVersions as versions,
+  buildSteps,
+  publishSteps,
   safeBefore,
   safeDirectory,
   safeFile,
   safeRepository,
-  setupNode,
   workflowYaml
 } from './workflow-parts.ts'
 
@@ -70,33 +69,12 @@ export function previewWorkflow(input: PreviewWorkflowInput): string {
           PTG_README: readme,
           PTG_BEFORE: before
         },
-        steps: [
-          {
-            name: `Check out the patch commit (actions/checkout ${versions.checkout})`,
-            uses: actions.checkout,
-            with: { 'persist-credentials': false }
-          },
-          setupNode,
-          { name: 'Mark the package as an unreviewed preview', run: markPreview },
-          {
-            name: 'Build and pack like the tarball check',
-            run: [
-              'mkdir -p "$RUNNER_TEMP/preview"',
-              'set -- "$PTG_PACKAGE_DIR" "$RUNNER_TEMP/preview" "$PTG_BEFORE"',
-              buildScript
-            ].join('\n')
-          },
-          {
-            name: `Keep the tarball (actions/upload-artifact ${versions.uploadArtifact})`,
-            uses: actions.uploadArtifact,
-            with: {
-              name: 'preview',
-              path: '${{ runner.temp }}/preview/*.tgz',
-              'if-no-files-found': 'error',
-              'retention-days': 7
-            }
-          }
-        ]
+        steps: buildSteps({
+          checkout: 'Check out the patch commit',
+          prepare: { name: 'Mark the package as an unreviewed preview', run: markPreview },
+          artifact: 'preview',
+          keep: { 'retention-days': 7 }
+        })
       },
       publish: {
         needs: 'build',
@@ -104,18 +82,10 @@ export function previewWorkflow(input: PreviewWorkflowInput): string {
         'runs-on': 'ubuntu-latest',
         'timeout-minutes': 10,
         permissions: {},
-        steps: [
-          setupNode,
-          {
-            name: `Fetch the tarball (actions/download-artifact ${versions.downloadArtifact})`,
-            uses: actions.downloadArtifact,
-            with: { name: 'preview', path: 'preview' }
-          },
-          {
-            name: 'Publish the preview to pkg.pr.new',
-            run: `npx --yes ${PKG_PR_NEW} publish --no-compact --no-template --comment=update --commentWithSha ./preview/*.tgz`
-          }
-        ]
+        steps: publishSteps('preview', {
+          name: 'Publish the preview to pkg.pr.new',
+          run: `npx --yes ${PKG_PR_NEW} publish --no-compact --no-template --comment=update --commentWithSha ./preview/*.tgz`
+        })
       }
     }
   }

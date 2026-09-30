@@ -1,14 +1,14 @@
 import { posix } from 'node:path'
-import { buildEnv, buildScript } from './builder/build-script.ts'
+import { buildEnv } from './builder/build-script.ts'
 import { BASE_BRANCH_PREFIX, PATCH_BRANCH_PREFIX } from './naming.ts'
 import type { DeploymentEnvironment, RepoRef } from './pipeline/ports.ts'
 import {
-  actions,
-  actionVersions,
+  buildSteps,
+  checked,
+  publishSteps,
   safeBefore,
   safeDirectory,
   safeRepository,
-  setupNode,
   workflowYaml
 } from './workflow-parts.ts'
 
@@ -84,18 +84,6 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n")
 console.log("Releasing " + manifest.name + "@" + manifest.version + " from " + env.GITHUB_SHA)
 PTG_VERSION`
 
-function checkedName(name: string): string {
-  if (!packageName.test(name)) throw new Error(`the stable release workflow cannot publish ${name}`)
-  return name
-}
-
-function checkedVersion(upstreamVersion: string): string {
-  if (!version.test(upstreamVersion)) {
-    throw new Error(`the stable release workflow cannot release version ${upstreamVersion}`)
-  }
-  return upstreamVersion
-}
-
 export function stableReleaseWorkflow(input: StableWorkflowInput): string {
   const repository = safeRepository(input.fork)
   const onlyHere = [
@@ -137,37 +125,16 @@ export function stableReleaseWorkflow(input: StableWorkflowInput): string {
         permissions: { contents: 'read' },
         env: {
           ...buildEnv,
-          PTG_PACKAGE_NAME: checkedName(input.packageName),
-          PTG_UPSTREAM_VERSION: checkedVersion(input.upstreamVersion),
+          PTG_PACKAGE_NAME: checked(input.packageName, packageName, 'package name'),
+          PTG_UPSTREAM_VERSION: checked(input.upstreamVersion, version, 'upstream version'),
           PTG_PACKAGE_DIR: safeDirectory(input.directory),
           PTG_BEFORE: safeBefore(input.publishedAt)
         },
-        steps: [
-          {
-            name: `Check out the merge commit (actions/checkout ${actionVersions.checkout})`,
-            uses: actions.checkout,
-            with: { 'persist-credentials': false }
-          },
-          setupNode,
-          { name: 'Choose the next -ptg.N version', run: chooseVersion },
-          {
-            name: 'Build and pack like the tarball check',
-            run: [
-              'mkdir -p "$RUNNER_TEMP/release"',
-              'set -- "$PTG_PACKAGE_DIR" "$RUNNER_TEMP/release" "$PTG_BEFORE"',
-              buildScript
-            ].join('\n')
-          },
-          {
-            name: `Keep the tarball (actions/upload-artifact ${actionVersions.uploadArtifact})`,
-            uses: actions.uploadArtifact,
-            with: {
-              name: 'release',
-              path: '${{ runner.temp }}/release/*.tgz',
-              'if-no-files-found': 'error'
-            }
-          }
-        ]
+        steps: buildSteps({
+          checkout: 'Check out the merge commit',
+          prepare: { name: 'Choose the next -ptg.N version', run: chooseVersion },
+          artifact: 'release'
+        })
       },
       publish: {
         needs: ['gate', 'build'],
@@ -176,18 +143,10 @@ export function stableReleaseWorkflow(input: StableWorkflowInput): string {
         'timeout-minutes': 10,
         environment: RELEASE_ENVIRONMENT.name,
         permissions: { 'id-token': 'write' },
-        steps: [
-          setupNode,
-          {
-            name: `Fetch the tarball (actions/download-artifact ${actionVersions.downloadArtifact})`,
-            uses: actions.downloadArtifact,
-            with: { name: 'release', path: 'release' }
-          },
-          {
-            name: 'Publish to npm with provenance through trusted publishing',
-            run: 'npm publish ./release/*.tgz --provenance --access public --tag latest --ignore-scripts'
-          }
-        ]
+        steps: publishSteps('release', {
+          name: 'Publish to npm with provenance through trusted publishing',
+          run: 'npm publish ./release/*.tgz --provenance --access public --tag latest --ignore-scripts'
+        })
       }
     }
   }

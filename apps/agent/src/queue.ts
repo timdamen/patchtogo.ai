@@ -7,6 +7,7 @@ import { repoName } from './upstream.ts'
 
 const PIPELINE_QUEUE = 'pipeline'
 const HEARTBEAT_SECONDS = 60
+const OPEN_JOB_STATES = new Set(['created', 'retry', 'active', 'failed'])
 
 export interface PipelineQueueOptions {
   concurrency: number
@@ -21,6 +22,7 @@ export interface PipelineQueue {
   work(handle: (event: PipelineEvent) => Promise<void>): Promise<void>
   retryFailedJobs(ghsaId: string): Promise<number>
   failedKeys(): Promise<string[]>
+  hasOpenJob(event: PipelineEvent): Promise<boolean>
 }
 
 function eventKey(event: PipelineEvent): string {
@@ -119,6 +121,10 @@ export async function createPipelineQueue(
     },
     failedKeys() {
       return boss.getBlockedKeys(PIPELINE_QUEUE)
+    },
+    async hasOpenJob(event) {
+      const jobs = await boss.findJobs(PIPELINE_QUEUE, { key: eventKey(event) })
+      return jobs.some((job) => OPEN_JOB_STATES.has(job.state))
     }
   }
 }

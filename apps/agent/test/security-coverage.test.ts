@@ -15,6 +15,7 @@ import {
   runId as firstRunId,
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
+import { inlineQueue } from './fakes/pipeline.ts'
 import { stores } from './support/stores.ts'
 
 const patched = '@patchtogo.ai/escape-html'
@@ -272,11 +273,7 @@ describe.each(stores)('security coverage on the %s store', (_name, createStore) 
 
     await requestRetry(laterGhsa, {
       store: test.store,
-      queue: {
-        send: (event: PipelineEvent) => test.pipeline.handle(event),
-        retryFailedJobs: async () => 0,
-        failedKeys: async () => []
-      }
+      queue: inlineQueue(test.pipeline)
     })
 
     expect(test.github.repositoryAdvisories).toEqual([

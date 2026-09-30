@@ -13,7 +13,21 @@ railway ssh -s agent -- node apps/agent/src/retry-cli.ts <GHSA-id>:<npm-package>
 railway ssh -s agent -- node apps/agent/src/test-advisory-cli.ts apps/agent/test-advisories/<file>.json
 ```
 
-The first lists failed runs, held runs with the reason they are held, and advisories whose queue job failed. With an ID it retries failed runs from their failed step and resumes held ones. The last one injects a test advisory (see [Test advisories](#test-advisories)); the file has to be in the deployed commit. In place of a path, `-` reads the advisory from standard input. Locally the same commands are `pnpm --filter agent retry …` and `pnpm --filter agent test-advisory …`, with paths relative to `apps/agent`.
+The first lists failed runs, held runs with the reason they are held, and advisories whose queue job failed. With an ID it retries failed runs from their failed step, and resumes held ones and unfinished ones (see [Stranded runs](#stranded-runs)). The last one injects a test advisory (see [Test advisories](#test-advisories)); the file has to be in the deployed commit. In place of a path, `-` reads the advisory from standard input. Locally the same commands are `pnpm --filter agent retry …` and `pnpm --filter agent test-advisory …`, with paths relative to `apps/agent`.
+
+### Stranded runs
+
+A run can be left unfinished with nothing in the queue to continue it: the service was redeployed in the middle of a step, a queue job was dropped, or an older version of the agent parked the run at a step it didn't have yet. When the service starts (after the migrations, before it serves requests) and then every `PTG_POLL_INTERVAL_MINUTES`, it queues a retry for every run that is
+
+- in `detected`, `triaged`, `forking`, `verifying` or `fixing`, or in `approved` with the stable release workflow's result already recorded,
+- not held, and
+- without a pg-boss job for its advisory in the `created`, `retry`, `active` or `failed` state (pg-boss retries a job cut off by a redeploy itself, and a failed job blocks its advisory until `retry <GHSA-id>`).
+
+The retry picks the run up at its step, which checks what it already did, so nothing is done twice. A `fixing` run whose fix isn't recorded yet starts a new fix session. The log line `stranded runs:` names the runs it resumed. A pass reads the runs in those states and asks pg-boss once per candidate, so it stays cheap.
+
+The sweep never touches runs that wait for people or for GitHub by design: `in-review`, `needs-human`, held runs, `approved` before the stable release workflow has reported back (the `workflow_run` webhook moves it on; `retry <run>` checks npm by hand), `released` waiting for its upstream pull request, `failed` runs and finished ones.
+
+`retry <GHSA-id>:<npm-package>` also resumes a run in needs-human, but only when you name the run. A run that needed a human at `forking`, `verifying` or `fixing` goes back to that step; at `fixing` the previous fix result is dropped, so a new fix session runs with a fresh model token. Its history records that the operator resumed it. A run waiting for the npm bootstrap of its first release resumes that release, as before. Other needs-human runs (a triage decision, a hand-over, a closed pull request) are refused, and `retry <GHSA-id>` leaves needs-human runs alone, apart from a release waiting for the npm bootstrap.
 
 ## Staged rollout
 

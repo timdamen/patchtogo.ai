@@ -7,6 +7,7 @@ import type {
   PipelineEvent,
   PullRequestClosed,
   PullRequestFeedback,
+  RetryRequested,
   StableReleaseCompleted,
   UpstreamVersionPublished
 } from './events.ts'
@@ -18,6 +19,7 @@ import {
   annotate,
   IllegalTransitionError,
   isTerminal,
+  resumeFromNeedsHuman,
   retry,
   transition,
   type PatchRun,
@@ -265,7 +267,7 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     if (failures.length > 0) throw failures[0]
   }
 
-  async function retryRequested(id: string): Promise<void> {
+  async function retryRequested({ runId: id, fromNeedsHuman }: RetryRequested): Promise<void> {
     const run = await store.getRun(id)
     if (!run) throw new Error(`no patch run ${id}`)
     if (run.state === 'needs-human' && run.stable) {
@@ -274,6 +276,11 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
         reason: 'The operator resumed the release.',
         details: { stable: { commit: run.stable.commit } }
       })
+    }
+    if (run.state === 'needs-human' && fromNeedsHuman) {
+      const resumed = resumeFromNeedsHuman(run, await store.listEvents(run.id), clock.now())
+      if (await save(resumed)) await advance(resumed)
+      return
     }
     if (run.state !== 'failed') {
       if (run.state === 'needs-human' || isTerminal(run.state)) {
@@ -298,7 +305,7 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
         case 'advisory-published':
           return advisoryPublished(event.ghsaId)
         case 'retry-requested':
-          return retryRequested(event.runId)
+          return retryRequested(event)
         case 'pull-request-commented':
         case 'review-submitted':
         case 'review-comment-created':

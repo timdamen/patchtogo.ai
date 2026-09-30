@@ -25,6 +25,7 @@ import { createModelProxy } from './model-proxy.ts'
 import { systemClock } from './clock.ts'
 import { createNpmRegistry } from './npm-registry.ts'
 import { consoleNotifier, createDiscordNotifier } from './notifier.ts'
+import { resumeStrandedRuns } from './operator.ts'
 import { IllegalTransitionError } from './pipeline/patch-run.ts'
 import { createPipeline } from './pipeline/pipeline.ts'
 import { openPostgres } from './postgres/connect.ts'
@@ -147,18 +148,34 @@ const upstreamWatch = createUpstreamWatch({ store, registry, emit: queue.send })
 
 const polling = new AbortController()
 
-async function repeat(name: string, task: () => Promise<string>): Promise<void> {
+async function report(name: string, task: () => Promise<string>): Promise<void> {
+  try {
+    console.log(`${name}: ${await task()}`)
+  } catch (error) {
+    console.error(`${name} failed`, error)
+  }
+}
+
+async function repeat(
+  name: string,
+  task: () => Promise<string>,
+  { now = true }: { now?: boolean } = {}
+): Promise<void> {
+  if (now) await report(name, task)
   while (!polling.signal.aborted) {
-    try {
-      console.log(`${name}: ${await task()}`)
-    } catch (error) {
-      console.error(`${name} failed`, error)
-    }
     await sleep(env.PTG_POLL_INTERVAL_MINUTES * 60_000, undefined, {
       signal: polling.signal
     }).catch(() => undefined)
+    if (!polling.signal.aborted) await report(name, task)
   }
 }
+
+async function resumeStranded(): Promise<string> {
+  const resumed = await resumeStrandedRuns({ store, queue })
+  return resumed.length > 0 ? `resumed ${resumed.join(', ')}` : 'none'
+}
+
+await report('stranded runs', resumeStranded)
 
 const server = createServer(webhooks, {
   modelProxy,
@@ -175,6 +192,7 @@ server.log.info(
 )
 void repeat('advisory poll', async () => `${await poller.poll()} advisories`)
 void repeat('upstream watch', async () => `${await upstreamWatch.check()} released packages`)
+void repeat('stranded runs', resumeStranded, { now: false })
 
 exitGracefully({
   deadlineMs: 25_000,

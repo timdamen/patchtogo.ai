@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { requestRetry } from '../src/operator.ts'
 import type { Automation } from '../src/pipeline/automation.ts'
 import type { FixResult } from '../src/pipeline/ports.ts'
 import {
@@ -15,6 +16,7 @@ import {
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
 import { baseBranchRuleset, type FakeRuleset } from './fakes/github.ts'
+import { inlineQueue } from './fakes/pipeline.ts'
 import { stores } from './support/stores.ts'
 
 describe.each(stores)('fixing and the patch PR on the %s store', (_name, createStore) => {
@@ -377,6 +379,37 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
         'ptg-run.2'
       ])
       expect(test.modelAccess.active()).toEqual([])
+    })
+
+    it('are issued afresh when the operator resumes a run that needed a human after its fix', async () => {
+      const test = await setup([
+        fixResult({ regressionAfter: { passed: false, output: 'still vulnerable' } }),
+        fixResult()
+      ])
+      await test.publish()
+      expect((await test.run())?.state).toBe('needs-human')
+      const operator = { store: test.store, queue: inlineQueue(test.pipeline) }
+
+      expect(await requestRetry(ghsaId, operator)).toEqual({ retriedJobs: 0, retriedRuns: [] })
+      expect((await test.run())?.state).toBe('needs-human')
+      expect(await requestRetry(runId, operator)).toEqual({ retriedJobs: 0, retriedRuns: [runId] })
+
+      expect(await test.run()).toMatchObject({
+        state: 'in-review',
+        fix: { regressionAfter: { passed: true } }
+      })
+      expect(test.github.pullRequests).toHaveLength(1)
+      expect(test.fixer.requests.map((request) => request.modelToken)).toEqual([
+        'ptg-run.1',
+        'ptg-run.2'
+      ])
+      expect(test.modelAccess.active()).toEqual([])
+      expect(await test.store.listEvents(runId)).toContainEqual(
+        expect.objectContaining({
+          state: 'fixing',
+          reason: 'The operator resumed the run at fixing after it needed a human.'
+        })
+      )
     })
   })
 

@@ -249,3 +249,37 @@ export function retry(run: PatchRun, at: Date): PatchRun {
     updatedAt: at
   }
 }
+
+const rerunnableSteps: readonly RunState[] = ['forking', 'verifying', 'fixing']
+
+export function needsHumanStep(
+  run: PatchRun,
+  history: readonly { state: RunState }[]
+): RunState | undefined {
+  if (run.state !== 'needs-human' || run.stable) return undefined
+  const step = history.findLast((event) => event.state !== 'needs-human')?.state
+  return step && rerunnableSteps.includes(step) ? step : undefined
+}
+
+export function cannotResume(run: PatchRun): string {
+  return `patch run ${run.id} is ${run.state}, so it cannot be resumed: only a run that needed a human at ${rerunnableSteps.join(', ')} or at its release can be`
+}
+
+export function resumeFromNeedsHuman(
+  run: PatchRun,
+  history: readonly { state: RunState }[],
+  at: Date
+): PatchRun {
+  const step = needsHumanStep(run, history)
+  if (!step) throw new IllegalTransitionError(cannotResume(run))
+  return {
+    ...run,
+    ...(step === 'fixing' ? { fix: undefined } : {}),
+    held: undefined,
+    state: step,
+    reason: `The operator resumed the run at ${step} after it needed a human.`,
+    failure: null,
+    version: run.version + 1,
+    updatedAt: at
+  }
+}

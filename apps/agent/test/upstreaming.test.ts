@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { requestRetry } from '../src/operator.ts'
 import type { Automation } from '../src/pipeline/automation.ts'
-import type { PipelineEvent } from '../src/pipeline/events.ts'
 import type { Pipeline } from '../src/pipeline/pipeline.ts'
 import {
   advisory,
@@ -15,6 +14,7 @@ import {
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
 import type { InMemoryGitHub } from './fakes/github.ts'
+import { inlineQueue } from './fakes/pipeline.ts'
 import type { FakeRegistry } from './fakes/registry.ts'
 import { stores } from './support/stores.ts'
 
@@ -76,11 +76,7 @@ describe.each(stores)('upstreaming and superseding on the %s store', (_name, cre
       }
     })
 
-    const queue = {
-      send: (event: PipelineEvent) => test.pipeline.handle(event),
-      retryFailedJobs: async () => 0,
-      failedKeys: async () => []
-    }
+    const queue = inlineQueue(test.pipeline)
     const operatorRetry = () => requestRetry(runId, { store: test.store, queue })
     const upstreamCommit = () => {
       const sha = test.github.repository(fork)?.branches.get(upstreamBranch)

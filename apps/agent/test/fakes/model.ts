@@ -1,5 +1,6 @@
 import { MockLanguageModelV4 } from 'ai/test'
 import { advisorySchema, type Advisory } from '../../src/advisory.ts'
+import type { Classification } from '../../src/comment-classification.ts'
 import type { Triage } from '../../src/triage.ts'
 
 type Prompt = Parameters<MockLanguageModelV4['doGenerate']>[0]['prompt']
@@ -14,6 +15,36 @@ function advisoryInPrompt(prompt: Prompt): Advisory {
     }
   }
   throw new Error('the prompt carries no <advisory> block')
+}
+
+function reviewerCommentsInPrompt(prompt: Prompt): string[] {
+  return prompt.flatMap((message) =>
+    message.role === 'user'
+      ? message.content.flatMap((part) =>
+          part.type === 'text'
+            ? [...part.text.matchAll(/<reviewer-comment>\n([\s\S]*?)\n<\/reviewer-comment>/g)].map(
+                (match) => match[1] ?? ''
+              )
+            : []
+        )
+      : []
+  )
+}
+
+export function classificationModel(
+  answer: (comments: string[]) => Classification
+): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    doGenerate: async ({ prompt }) => ({
+      content: [{ type: 'text', text: JSON.stringify(answer(reviewerCommentsInPrompt(prompt))) }],
+      finishReason: { unified: 'stop', raw: undefined },
+      usage: {
+        inputTokens: { total: 30, noCache: 30, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 5, text: 5, reasoning: undefined }
+      },
+      warnings: []
+    })
+  })
 }
 
 export function triageModel(answer: (advisory: Advisory) => Triage): MockLanguageModelV4 {

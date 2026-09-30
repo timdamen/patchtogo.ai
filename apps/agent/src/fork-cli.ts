@@ -3,6 +3,7 @@ import { createSandboxBuilder } from './builder/sandbox-builder.ts'
 import { fixerEnvSchema, githubAppEnvSchema, pipelineEnvSchema } from './env.ts'
 import { fixerSettings } from './fixer/config.ts'
 import { createGitHubApp, installationOctokit } from './github-app.ts'
+import { systemClock } from './clock.ts'
 import { createNpmRegistry } from './npm-registry.ts'
 import { InMemoryStore } from './pipeline/memory-store.ts'
 import { newPatchRun } from './pipeline/patch-run.ts'
@@ -85,9 +86,10 @@ const pipeline = createPipeline(
       grant: () => Promise.reject(new Error('the fork CLI does not grant model access'))
     },
     model: 'triage-is-skipped',
+    smallModel: 'classification-is-skipped',
     store,
     notifier: consoleNotifier,
-    clock: { now: () => new Date() }
+    clock: systemClock
   },
   {
     forkOrg: settings.PTG_FORK_ORG,

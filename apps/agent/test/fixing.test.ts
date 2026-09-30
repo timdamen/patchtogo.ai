@@ -64,6 +64,7 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       expect(body).toContain('index.js now escapes < so the payload renders as text.')
       expect(body).toContain('| Regression test on the base branch | fails, as required |')
       expect(body).toContain('| Regression test with the fix | passes, as required |')
+      expect(body).toContain('| Upstream test suite on the base branch | passes |')
       expect(body).toContain('| Upstream test suite with the fix | passes |')
       expect(body).toContain('not escaped')
       expect(body).toContain('12 passing')
@@ -110,6 +111,32 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       })
     })
 
+    it.each<[string, FixResult['upstreamTests'], string]>([
+      [
+        'has no upstream test suite',
+        { suite: 'none', reason: 'The package.json of the package has no test script.' },
+        '| Upstream test suite | no upstream test suite |'
+      ],
+      [
+        'has an upstream test suite that already fails on the base branch',
+        {
+          suite: 'ran',
+          before: { passed: false, output: 'needs a database' },
+          after: { passed: false, output: 'needs a database' }
+        },
+        '| Upstream test suite with the fix | fails, as on the base branch |'
+      ]
+    ])('opens the PR and says so when the package %s', async (_case, upstreamTests, row) => {
+      const test = await setup([fixResult({ upstreamTests })])
+
+      await test.publish()
+
+      expect((await test.run())?.state).toBe('in-review')
+      const body = test.github.pullRequests[0]?.body ?? ''
+      expect(body).toContain(row)
+      expect(body).not.toMatch(/\| Upstream test suite[^|]*\| passes/)
+    })
+
     it('puts only the fix and the regression test into the PR diff, on top of the base branch', async () => {
       const test = await setup([fixResult()])
 
@@ -132,12 +159,28 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       [
         'the regression test already passes on the base branch',
         { regressionBefore: { passed: true, output: 'ok' } },
-        /it passes on the base branch\./
+        /^The fixer did not produce a red-to-green regression test: it passes on the base branch\./
       ],
       [
         'the regression test still fails with the fix',
         { regressionAfter: { passed: false, output: 'still vulnerable' } },
-        /it fails with the fix\./
+        /^The fixer did not produce a red-to-green regression test: it fails with the fix\./
+      ],
+      [
+        'the upstream test suite passes on the base branch but fails with the fix',
+        {
+          upstreamTests: {
+            suite: 'ran',
+            before: { passed: true, output: '12 passing' },
+            after: { passed: false, output: '11 passing, 1 failing' }
+          }
+        },
+        /^The upstream test suite passes on the base branch but fails with the fix\./
+      ],
+      [
+        'the upstream test suite did not run',
+        { upstreamTests: { suite: 'not-run', reason: 'the fix session ran out of budget' } },
+        /^The upstream test suite did not run: the fix session ran out of budget/
       ]
     ]
 
@@ -150,7 +193,6 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
 
         const run = await test.run()
         expect(run?.state).toBe('needs-human')
-        expect(run?.reason).toMatch(/^The fixer did not produce a red-to-green regression test/)
         expect(run?.reason).toMatch(reason)
         expect(run?.fix).toBeDefined()
         expect(await test.store.getSession(runId)).toBeDefined()
@@ -208,6 +250,27 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       [
         'patchtogo can bypass the ruleset',
         [{ ...baseBranchRuleset, rule: { ...rule, bypass: 'always' } }]
+      ],
+      [
+        'the ruleset needs only one approval from the reviewer team',
+        [
+          {
+            ...baseBranchRuleset,
+            rule: {
+              ...rule,
+              teamReviews: [{ team: 'reviewers', approvals: 1, filePatterns: ['*'] }]
+            }
+          }
+        ]
+      ],
+      [
+        'the ruleset needs the approvals from another team',
+        [
+          {
+            ...baseBranchRuleset,
+            rule: { ...rule, teamReviews: [{ team: 'others', approvals: 2, filePatterns: ['*'] }] }
+          }
+        ]
       ]
     ]
 
@@ -237,6 +300,32 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
         expect(test.fixer.requests).toHaveLength(1)
       }
     )
+  })
+
+  it('accepts CODEOWNERS naming only the reviewer team when the ruleset has no team reviewers', async () => {
+    const test = await setup([fixResult()])
+    test.github.rulesets = [
+      { ...baseBranchRuleset, rule: { ...baseBranchRuleset.rule, teamReviews: [] } }
+    ]
+    test.github.failNext('setDefaultBranch')
+    await test.publish()
+    const codeOwners = (owners: string) =>
+      test.github.pushCommit(fork, baseBranch, 'change code owners', {
+        '.github/CODEOWNERS': `* ${owners}\n`
+      })
+
+    codeOwners('@patchtogo-ai/reviewers @mallory')
+    await test.retry()
+
+    expect(await test.run()).toMatchObject({
+      state: 'failed',
+      failure: { step: 'fixing', error: expect.stringContaining('is not protected') }
+    })
+
+    codeOwners('@patchtogo-ai/reviewers')
+    await test.retry()
+
+    expect((await test.run())?.state).toBe('in-review')
   })
 
   describe('run tokens', () => {

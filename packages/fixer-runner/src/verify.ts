@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { appendFile, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { LeadReport, RunnerResult, TestRun } from './protocol.ts'
+import type { LeadReport, RunnerResult, TestRun, UpstreamSuite } from './protocol.ts'
 import { isInside } from './workdir-guard.ts'
 
 const OUTPUT_LIMIT = 16_000
@@ -130,6 +130,14 @@ export class Workspace {
     }
   }
 
+  async readFile(file: string): Promise<string | undefined> {
+    try {
+      return await readFile(path.join(this.#workdir, file), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+
   async checkout(commit: string, files: string[] = []): Promise<void> {
     if (files.length === 0) {
       await this.git('checkout', '--quiet', '--force', '--detach', commit)
@@ -152,4 +160,65 @@ export async function rerunRegression(
   const before = await workspace.run(test.command)
   await workspace.checkout(commits.patched)
   return { before, after, verdict: regressionVerdict(before, after) }
+}
+
+const INSTALL = 'npm install --no-save --no-package-lock --no-audit --no-fund'
+
+const TEST = 'npm test'
+
+const npmPlaceholder = /no test specified/i
+
+type Manifest = { scripts: string } | { reason: string }
+
+function manifestOf(text: string | undefined): Manifest {
+  if (text === undefined) return { reason: 'The package has no package.json.' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { reason: 'The package.json of the package is not valid JSON.' }
+  }
+  const scripts = (parsed as { scripts?: unknown } | null)?.scripts
+  const test = (scripts as { test?: unknown } | null | undefined)?.test
+  if (typeof test !== 'string' || !test.trim()) {
+    return { reason: 'The package.json of the package has no test script.' }
+  }
+  if (npmPlaceholder.test(test)) {
+    return { reason: `The test script in package.json is npm's placeholder, which only fails.` }
+  }
+  return { scripts: JSON.stringify(scripts) }
+}
+
+function changedScripts(): TestRun {
+  return {
+    command: TEST,
+    exitCode: null,
+    passed: false,
+    output:
+      'The patch changes the scripts in package.json, so the upstream test suite of the base branch cannot be run on the patched code.'
+  }
+}
+
+export async function rerunUpstreamSuite(
+  workspace: Workspace,
+  commits: { base: string; patched: string }
+): Promise<UpstreamSuite> {
+  await workspace.checkout(commits.base)
+  const base = manifestOf(await workspace.readFile('package.json'))
+  if ('reason' in base) {
+    await workspace.checkout(commits.patched)
+    return { suite: 'none', reason: base.reason }
+  }
+  await workspace.git('clean', '-ffdqX')
+  const install = await workspace.run(INSTALL)
+  const before = install.passed ? await workspace.run(TEST) : install
+  await workspace.checkout(commits.patched)
+  const patched = manifestOf(await workspace.readFile('package.json'))
+  const after =
+    !('scripts' in patched) || patched.scripts !== base.scripts
+      ? changedScripts()
+      : install.passed
+        ? await workspace.run(TEST)
+        : install
+  return { suite: 'ran', command: TEST, before, after }
 }

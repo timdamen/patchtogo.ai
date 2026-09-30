@@ -1,10 +1,13 @@
 import { patchedPackageName, type NamingSettings } from '../naming.ts'
-import { STABLE_WORKFLOW_NAME } from '../stable-workflow.ts'
+import { CODEOWNERS_FILE } from '../scaffolding.ts'
+import { RELEASE_ENVIRONMENT, STABLE_WORKFLOW_NAME } from '../stable-workflow.ts'
 import { repoName } from '../upstream.ts'
 import type { PatchRun, Step } from './patch-run.ts'
 import type { GitHub, Ports, RepoRef, ReviewRule } from './ports.ts'
 
 const REQUIRED_APPROVALS = 2
+
+const everyFile = new Set(['*', '**', '**/*'])
 
 function enforcesReview(rule: ReviewRule): boolean {
   return (
@@ -15,15 +18,49 @@ function enforcesReview(rule: ReviewRule): boolean {
   )
 }
 
+function teamApprovesEverything(rule: ReviewRule, team: string): boolean {
+  return rule.teamReviews.some(
+    (review) =>
+      review.team === team &&
+      review.approvals >= REQUIRED_APPROVALS &&
+      review.filePatterns.some((pattern) => everyFile.has(pattern))
+  )
+}
+
+function onlyTeamOwns(codeOwners: string | undefined, owner: string): boolean {
+  const rules = (codeOwners ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*/, '').trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/))
+  return (
+    rules.some(([pattern]) => pattern === '*') &&
+    rules.every(
+      ([, ...owners]) => owners.length === 1 && owners[0]?.toLowerCase() === owner.toLowerCase()
+    )
+  )
+}
+
 export async function unprotectedBranch(
   github: GitHub,
   repo: RepoRef,
-  branch: string
+  branch: string,
+  team: string
 ): Promise<string | undefined> {
   const rules = await github.branchReviewRules(repo, branch)
-  if (rules.some(enforcesReview)) return undefined
+  const enforced = rules.filter(enforcesReview)
+  if (enforced.some((rule) => teamApprovesEverything(rule, team))) return undefined
+  const teamReviewsUnavailable = rules.every((rule) => rule.teamReviews.length === 0)
+  if (
+    enforced.length > 0 &&
+    teamReviewsUnavailable &&
+    onlyTeamOwns(await github.readFile(repo, branch, CODEOWNERS_FILE), `@${repo.owner}/${team}`)
+  ) {
+    return undefined
+  }
   return [
-    `${branch} in ${repoName(repo)} is not protected: no active ruleset requires ${REQUIRED_APPROVALS} approvals, a code owner review and approval of the last push without letting patchtogo bypass it.`,
+    `${branch} in ${repoName(repo)} is not protected: no active ruleset requires ${REQUIRED_APPROVALS} approvals from ${repo.owner}/${team} on every file, a code owner review and approval of the last push without letting patchtogo bypass it.`,
+    `Without team reviewers in the ruleset, ${CODEOWNERS_FILE} on the branch has to name only @${repo.owner}/${team}.`,
     'Create the organisation ruleset from the operator setup (https://patchtogo.ai/operations#protect-the-base-branches-once), then retry the run.'
   ].join(' ')
 }
@@ -34,7 +71,7 @@ function workflowRuns(fork: RepoRef, branch: string): string {
 }
 
 function trustCommand(name: string, fork: RepoRef): string {
-  return `npm trust github ${name} --repo ${repoName(fork)} --file ${STABLE_WORKFLOW_NAME} --allow-publish --yes`
+  return `npm trust github ${name} --repo ${repoName(fork)} --file ${STABLE_WORKFLOW_NAME} --environment ${RELEASE_ENVIRONMENT.name} --allow-publish --yes`
 }
 
 function firstPublish(run: PatchRun, name: string, fork: RepoRef, branch: string): string {
@@ -55,7 +92,17 @@ function firstPublish(run: PatchRun, name: string, fork: RepoRef, branch: string
   ].join('\n')
 }
 
-export function releasingSteps({ registry }: Ports, settings: NamingSettings): { approved: Step } {
+const NPM_RECHECKS_MS = [15_000, 30_000, 60_000, 120_000]
+
+export function releasingSteps(
+  { registry, clock }: Ports,
+  settings: NamingSettings
+): { approved: Step } {
+  async function releaseOf(name: string, commit: string) {
+    const published = await registry.getPackage(name)
+    return { published, version: published?.versions.find((v) => v.gitHead === commit) }
+  }
+
   return {
     async approved(run) {
       const { stable, fork, baseBranch } = run
@@ -63,8 +110,14 @@ export function releasingSteps({ registry }: Ports, settings: NamingSettings): {
         throw new Error(`patch run ${run.id} has no merged patch PR to release`)
       }
       const name = patchedPackageName(run.packageName, settings)
-      const published = await registry.getPackage(name)
-      const version = published?.versions.find((v) => v.gitHead === stable.commit)
+      let { published, version } = await releaseOf(name, stable.commit)
+      if (published && stable.workflow?.conclusion === 'success') {
+        for (const wait of NPM_RECHECKS_MS) {
+          if (version) break
+          await clock.sleep(wait)
+          ;({ published, version } = await releaseOf(name, stable.commit))
+        }
+      }
       if (version) {
         return {
           to: 'released',
@@ -79,7 +132,7 @@ export function releasingSteps({ registry }: Ports, settings: NamingSettings): {
       if (!workflow) return undefined
       if (workflow.conclusion === 'success') {
         throw new Error(
-          `The stable release workflow succeeded (${workflow.url}), but npm shows no version of ${name} built from ${stable.commit}. Either npm hasn't caught up yet, or the workflow's gate found no merged patch PR for that commit and published nothing. Retry the run once the version shows up, or re-run the workflow.`
+          `The stable release workflow succeeded (${workflow.url}), but npm still shows no version of ${name} built from ${stable.commit} after ${NPM_RECHECKS_MS.reduce((sum, wait) => sum + wait, 0) / 60_000} minutes of rechecking. Either npm is unusually slow, or the workflow's gate found no merged patch PR for that commit and published nothing. Retry the run once the version shows up, or re-run the workflow.`
         )
       }
       throw new Error(

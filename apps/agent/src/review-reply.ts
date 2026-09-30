@@ -63,6 +63,12 @@ function outcomeLines(iteration: Iteration, fork: RepoRef): string[] {
       ]
     case 'blocked':
       return [`Nothing was pushed. ${iteration.reason ?? ''}`]
+    case 'answered':
+      return [
+        'This asks for no code change, so the fixer did not run. A short answer (model output):',
+        '',
+        fenced(iteration.reason ?? '', SUMMARY_LIMIT)
+      ]
   }
 }
 

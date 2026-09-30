@@ -152,7 +152,13 @@ console.log(
       summary: result.summary,
       regressionBefore: result.regressionBefore.passed ? 'passed' : 'failed',
       regressionAfter: result.regressionAfter.passed ? 'passed' : 'failed',
-      upstreamTests: result.upstreamTests.passed ? 'passed' : 'failed',
+      upstreamTests:
+        result.upstreamTests.suite === 'ran'
+          ? {
+              base: result.upstreamTests.before.passed ? 'passed' : 'failed',
+              patched: result.upstreamTests.after.passed ? 'passed' : 'failed'
+            }
+          : result.upstreamTests,
       cost: result.cost,
       sessionId: result.session.id,
       ...(values['hostile-config']

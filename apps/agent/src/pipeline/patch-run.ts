@@ -1,6 +1,6 @@
 import type { Advisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
-import type { PullRequest, RepoRef, TestResult } from './ports.ts'
+import type { PullRequest, RepoRef, TestResult, UpstreamTests } from './ports.ts'
 
 const runStates = [
   'detected',
@@ -65,7 +65,7 @@ export interface FixOutcome {
   diff: string
   regressionBefore: TestResult
   regressionAfter: TestResult
-  upstreamTests: TestResult
+  upstreamTests: UpstreamTests
   summary: string
 }
 
@@ -76,7 +76,7 @@ export interface Feedback {
   text: string
 }
 
-export type IterationVerdict = 'push' | 'unchanged' | 'rejected' | 'blocked'
+export type IterationVerdict = 'push' | 'unchanged' | 'rejected' | 'blocked' | 'answered'
 
 export interface Iteration {
   number: number

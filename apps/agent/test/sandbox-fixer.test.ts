@@ -128,7 +128,6 @@ const finished: RunnerResult = {
   report: {
     summary: 'Refuse __proto__ path segments.',
     regressionTest: { files: ['test/ghsa.js'], command: 'node test/ghsa.js' },
-    upstreamTestCommand: 'npm test',
     concerns: ['constructor.prototype is guarded too']
   },
   error: null,
@@ -138,7 +137,12 @@ const finished: RunnerResult = {
     after: { command: 'node test/ghsa.js', exitCode: 0, passed: true, output: '' },
     verdict: 'red-to-green'
   },
-  upstreamTests: { command: 'npm test', exitCode: 0, passed: true, output: 'ok' },
+  upstreamTests: {
+    suite: 'ran',
+    command: 'npm test',
+    before: { command: 'npm test', exitCode: 0, passed: true, output: 'ok' },
+    after: { command: 'npm test', exitCode: 1, passed: false, output: '1 failing' }
+  },
   usage: {
     costUsd: 2.5,
     inputTokens: 1200,
@@ -334,7 +338,11 @@ describe('sandbox fixer', () => {
     expect(result.regressionBefore.passed).toBe(false)
     expect(result.regressionBefore.output).toContain('(exit 1)')
     expect(result.regressionAfter.passed).toBe(true)
-    expect(result.upstreamTests.passed).toBe(true)
+    expect(result.upstreamTests).toEqual({
+      suite: 'ran',
+      before: { passed: true, output: '$ npm test\n(exit 0)\nok' },
+      after: { passed: false, output: '$ npm test\n(exit 1)\n1 failing' }
+    })
     expect(result.summary).toContain('Concern: constructor.prototype is guarded too')
     expect(result.cost).toEqual({
       usd: 2.5,
@@ -377,7 +385,15 @@ describe('sandbox fixer', () => {
 
     expect(result.regressionBefore.passed).toBe(false)
     expect(result.regressionAfter.passed).toBe(false)
+    expect(result.upstreamTests).toEqual({ suite: 'not-run', reason: 'budget spent' })
     expect(result.summary).toBe('The fix session did not finish: budget spent')
+  })
+
+  it('reports a package without a test suite as none, never as a pass', async () => {
+    const reason = 'The package.json of the package has no test script.'
+    sandbox.state.runner.result = { ...finished, upstreamTests: { suite: 'none', reason } }
+
+    expect((await fix()).upstreamTests).toEqual({ suite: 'none', reason })
   })
 
   it('ships the runner sources with only its runtime dependencies', async () => {

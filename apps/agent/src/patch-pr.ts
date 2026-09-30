@@ -1,6 +1,6 @@
 import { patchedPackageName, type NamingSettings } from './naming.ts'
 import type { FixOutcome, PatchRun, UpstreamRelease } from './pipeline/patch-run.ts'
-import type { RepoRef, TestResult } from './pipeline/ports.ts'
+import type { RepoRef, TestResult, UpstreamTests } from './pipeline/ports.ts'
 import { previewInstallUrl } from './preview-workflow.ts'
 import type { Triage } from './triage.ts'
 import { repoName } from './upstream.ts'
@@ -46,13 +46,47 @@ function outcome(result: TestResult, expected: 'fail' | 'pass'): string {
   return `${verdict}, ${as}`
 }
 
+function passes(result: TestResult): string {
+  return result.passed ? 'passes' : 'fails'
+}
+
+function upstreamRows(tests: UpstreamTests): string[] {
+  switch (tests.suite) {
+    case 'none':
+      return ['| Upstream test suite | no upstream test suite |']
+    case 'not-run':
+      return ['| Upstream test suite | **not run** |']
+    case 'ran': {
+      const { before, after } = tests
+      const withFix = after.passed
+        ? 'passes'
+        : before.passed
+          ? '**fails**, but passes on the base branch'
+          : 'fails, as on the base branch'
+      return [
+        `| Upstream test suite on the base branch | ${passes(before)} |`,
+        `| Upstream test suite with the fix | ${withFix} |`
+      ]
+    }
+  }
+}
+
+export function upstreamTestDetails(tests: UpstreamTests): string[] {
+  if (tests.suite !== 'ran') return [details('Upstream test suite', fenced(tests.reason))]
+  return [
+    details('Upstream test suite on the base branch', fenced(tests.before.output, OUTPUT_LIMIT)),
+    '',
+    details('Upstream test suite with the fix', fenced(tests.after.output, OUTPUT_LIMIT))
+  ]
+}
+
 export function testResultTable(fix: FixOutcome): string[] {
   return [
     '| Check | Result |',
     '| --- | --- |',
     `| Regression test on the base branch | ${outcome(fix.regressionBefore, 'fail')} |`,
     `| Regression test with the fix | ${outcome(fix.regressionAfter, 'pass')} |`,
-    `| Upstream test suite with the fix | ${fix.upstreamTests.passed ? 'passes' : '**fails**'} |`
+    ...upstreamRows(fix.upstreamTests)
   ]
 }
 
@@ -153,7 +187,7 @@ export function patchPrBody({
     '',
     details('Regression test after the fix', fenced(fix.regressionAfter.output, OUTPUT_LIMIT)),
     '',
-    details('Upstream test suite', fenced(fix.upstreamTests.output, OUTPUT_LIMIT)),
+    ...upstreamTestDetails(fix.upstreamTests),
     '',
     '## Review',
     '',

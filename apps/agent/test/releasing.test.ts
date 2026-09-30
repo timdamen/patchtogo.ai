@@ -119,6 +119,19 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
     })
   })
 
+  it('rechecks npm for a while when the version is not there yet after a successful workflow', async () => {
+    const test = await inReview()
+    const commit = await test.merge()
+    test.clock.onNextSleep(() => test.releaseOnNpm(commit))
+
+    await test.complete(commit, 'success')
+
+    expect(await test.run()).toMatchObject({
+      state: 'released',
+      stable: { commit, version: '1.0.3-ptg.1' }
+    })
+  })
+
   it('fails when a successful workflow left no version on npm, and a retry checks npm again', async () => {
     const test = await inReview()
     const commit = await test.merge()
@@ -129,7 +142,9 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
       state: 'failed',
       failure: {
         step: 'approved',
-        error: expect.stringContaining(`npm shows no version of ${patched} built from ${commit}`)
+        error: expect.stringContaining(
+          `npm still shows no version of ${patched} built from ${commit}`
+        )
       }
     })
 
@@ -153,7 +168,7 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
       for (const step of [
         `npm pkg set name=${patched} version=0.0.0-ptg.0`,
         'npm publish --access public --tag bootstrap',
-        `npm trust github ${patched} --repo ${repository} --file patchtogo-release.yml --allow-publish --yes`,
+        `npm trust github ${patched} --repo ${repository} --file patchtogo-release.yml --environment patchtogo-release --allow-publish --yes`,
         `https://github.com/${repository}/actions/workflows/patchtogo-release.yml?query=branch%3Aptg%2Fbase%2Fescape-html%2F1.0.3`
       ]) {
         expect(run?.reason).toContain(step)
@@ -219,6 +234,20 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
         `https://github.com/${repository}/pull/1 was closed without being merged`
       )
     })
+    expect(test.notifier.notifications.at(-1)).toMatchObject({ type: 'needs-human', runId })
+  })
+
+  it('stays in review until the reviewer channel heard that the patch PR was closed', async () => {
+    const test = await inReview()
+    test.notifier.failNext()
+
+    await expect(test.close(null)).rejects.toThrow('reviewer channel is down')
+
+    expect((await test.run())?.state).toBe('in-review')
+
+    await test.close(null)
+
+    expect((await test.run())?.state).toBe('needs-human')
     expect(test.notifier.notifications.at(-1)).toMatchObject({ type: 'needs-human', runId })
   })
 

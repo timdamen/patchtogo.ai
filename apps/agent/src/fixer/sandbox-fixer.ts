@@ -3,14 +3,24 @@ import {
   runnerResultSchema,
   type RunnerInput,
   type RunnerResult,
-  type TestRun
+  type TestRun,
+  type UpstreamSuite
 } from '@patchtogo/fixer-runner/protocol'
 import type { Sandbox } from '@vercel/sandbox'
-import type { FixRequest, FixResult, Fixer, ModelSpend, TestResult } from '../pipeline/ports.ts'
+import type {
+  FixRequest,
+  FixResult,
+  Fixer,
+  ModelSpend,
+  TestResult,
+  UpstreamTests
+} from '../pipeline/ports.ts'
 import {
   check,
   NPM_REGISTRY,
-  openSandbox,
+  sandboxDirectories,
+  unpackArchive,
+  withSandbox,
   type SandboxCredentials,
   type SourceArchive
 } from '../sandbox.ts'
@@ -19,13 +29,11 @@ import { runnerPackage } from './runner-package.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export const sandboxLayout = {
-  root: '/vercel/ptg',
-  runner: '/vercel/ptg/runner',
-  work: '/vercel/ptg/work',
-  io: '/vercel/ptg/io',
-  claude: '/vercel/ptg/claude',
-  transcripts: '/vercel/ptg/claude/projects/run'
+const sandboxLayout = {
+  ...sandboxDirectories,
+  runner: `${sandboxDirectories.root}/runner`,
+  claude: `${sandboxDirectories.root}/claude`,
+  transcripts: `${sandboxDirectories.root}/claude/projects/run`
 } as const
 
 const files = {
@@ -113,6 +121,16 @@ function testResult(run: TestRun | null, fallback: string): TestResult {
   return { passed: run.passed, output: `$ ${run.command}\n(exit ${run.exitCode})\n${run.output}` }
 }
 
+function upstreamTestsOf(suite: UpstreamSuite | null, problem: string): UpstreamTests {
+  if (!suite) return { suite: 'not-run', reason: problem }
+  if (suite.suite === 'none') return suite
+  return {
+    suite: 'ran',
+    before: testResult(suite.before, problem),
+    after: testResult(suite.after, problem)
+  }
+}
+
 const nothingSpent: ModelSpend = {
   usd: 0,
   inputTokens: 0,
@@ -147,9 +165,6 @@ function fixResult(
   }
   const session = { id: result.sessionId, transcript, totals }
   const problem = result.error ?? 'the fix session returned no report'
-  const upstreamTests = result.report?.upstreamTestCommand
-    ? testResult(result.upstreamTests, problem)
-    : { passed: true, output: 'The package has no upstream test suite.' }
   const concerns = result.report?.concerns ?? []
   const summary = result.report
     ? [result.report.summary, ...concerns.map((concern) => `Concern: ${concern}`)].join('\n\n')
@@ -158,7 +173,7 @@ function fixResult(
     diff: result.diff,
     regressionBefore: testResult(result.regression?.before ?? null, problem),
     regressionAfter: testResult(result.regression?.after ?? null, problem),
-    upstreamTests: result.report ? upstreamTests : { passed: false, output: problem },
+    upstreamTests: upstreamTestsOf(result.upstreamTests, problem),
     summary,
     cost: { ...spent(totals, before), sandboxSeconds },
     session
@@ -234,14 +249,7 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
           ]
         : [])
     ])
-    await check(sandbox, 'unpacking the package source', 'tar', [
-      '-xzf',
-      files.source,
-      '-C',
-      sandboxLayout.work,
-      '--strip-components=1',
-      '--no-same-owner'
-    ])
+    await unpackArchive(sandbox, 'unpacking the package source', files.source, sandboxLayout.work)
     if (request.resume) {
       await check(sandbox, 'restoring the session transcript', 'tar', [
         '-xzf',
@@ -275,28 +283,24 @@ export function createSandboxFixer(options: SandboxFixerOptions): Fixer {
 
   return {
     async fix(request) {
-      let sandbox: Sandbox | undefined
-      try {
-        const input = runnerInput(request, { ...options, proxyBaseUrl })
-        const created = Date.now()
-        sandbox = await openSandbox({
+      const input = runnerInput(request, { ...options, proxyBaseUrl })
+      return withSandbox(
+        {
           credentials,
           timeoutMs: limits.sandboxTimeoutMs,
           networkPolicy: 'allow-all',
           purpose: 'fixer'
-        })
-        await provision(sandbox)
-        await sandbox.update({
-          networkPolicy: { allow: [new URL(proxyBaseUrl).hostname, NPM_REGISTRY] }
-        })
-        await stage(sandbox, request, input, request.modelToken)
-        const runnerExit = await runRunner(sandbox)
-        return await collect(sandbox, request, runnerExit, () =>
-          Math.round((Date.now() - created) / 1000)
-        )
-      } finally {
-        await sandbox?.stop().catch(() => undefined)
-      }
+        },
+        async (sandbox, seconds) => {
+          await provision(sandbox)
+          await sandbox.update({
+            networkPolicy: { allow: [new URL(proxyBaseUrl).hostname, NPM_REGISTRY] }
+          })
+          await stage(sandbox, request, input, request.modelToken)
+          const runnerExit = await runRunner(sandbox)
+          return collect(sandbox, request, runnerExit, seconds)
+        }
+      )
     }
   }
 }

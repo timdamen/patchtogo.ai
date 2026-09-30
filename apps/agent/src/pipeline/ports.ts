@@ -75,11 +75,23 @@ export interface BranchOf {
   branch: string
 }
 
+export interface TeamReview {
+  team: string | null
+  approvals: number
+  filePatterns: string[]
+}
+
 export interface ReviewRule {
   approvals: number
   codeOwnerReview: boolean
   lastPushApproval: boolean
   bypass: string | null
+  teamReviews: TeamReview[]
+}
+
+export interface DeploymentEnvironment {
+  name: string
+  branches: string[]
 }
 
 export interface AffectedVersions {
@@ -126,6 +138,7 @@ export interface GitHub {
   deleteBranch(repo: RepoRef, branch: string): Promise<void>
   setDefaultBranch(repo: RepoRef, branch: string): Promise<void>
   enableActions(repo: RepoRef): Promise<void>
+  ensureEnvironment(repo: RepoRef, environment: DeploymentEnvironment): Promise<void>
   findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined>
   findPullRequestFrom(repo: RepoRef, head: BranchOf): Promise<PullRequest | undefined>
   pullRequestFiles(repo: RepoRef, pullRequest: number): Promise<string[]>
@@ -201,6 +214,11 @@ export interface TestResult {
   output: string
 }
 
+export type UpstreamTests =
+  | { suite: 'none'; reason: string }
+  | { suite: 'not-run'; reason: string }
+  | { suite: 'ran'; before: TestResult; after: TestResult }
+
 export interface ModelSpend {
   usd: number
   inputTokens: number
@@ -234,7 +252,7 @@ export interface FixResult {
   diff: string
   regressionBefore: TestResult
   regressionAfter: TestResult
-  upstreamTests: TestResult
+  upstreamTests: UpstreamTests
   summary: string
   cost: FixCost
   session: FixSession
@@ -367,6 +385,7 @@ export interface Notifier {
 
 export interface Clock {
   now(): Date
+  sleep(milliseconds: number): Promise<void>
 }
 
 export interface Ports {
@@ -376,6 +395,7 @@ export interface Ports {
   fixer: Fixer
   modelAccess: ModelAccess
   model: LanguageModel
+  smallModel: LanguageModel
   store: Store
   notifier: Notifier
   clock: Clock

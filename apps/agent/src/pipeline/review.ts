@@ -5,6 +5,7 @@ import {
   iterationReply,
   someoneElsePushed
 } from '../review-reply.ts'
+import { classifyFeedback } from '../comment-classification.ts'
 import { DiffError, diffChanges } from '../unified-diff.ts'
 import { repoName, sameRepository } from '../upstream.ts'
 import type { Automation } from './automation.ts'
@@ -287,6 +288,25 @@ export function reviewLoop(ports: Ports, settings: ReviewSettings) {
       commit: null,
       pushed: false
     }
+    const { classification, usage } = await classifyFeedback(
+      ports.smallModel,
+      review.instructions.map((feedback) => feedback.text)
+    )
+    await store.recordCost({
+      runId: run.id,
+      step: run.state,
+      ...usage,
+      costUsd: null,
+      sandboxSeconds: 0,
+      at: clock.now()
+    })
+    if (!classification.actionable) {
+      return keep(
+        { ...review, instructions: [] },
+        { ...iteration, verdict: 'answered', reason: classification.reply },
+        `Review iteration ${iteration.number}: the feedback asks for no change, so it gets a reply without a fix.`
+      )
+    }
     const drained = { ...review, instructions: [], context: [] }
     const head = await github.getBranch(fork, patchBranch.name)
     if (head !== patchBranch.sha) {
@@ -363,6 +383,7 @@ export function reviewLoop(ports: Ports, settings: ReviewSettings) {
     }
     const outcome = {
       push: `pushed ${current.commit}`,
+      answered: 'replied without a fix',
       unchanged: 'no code change',
       rejected: `nothing pushed: ${clip(current.reason ?? '')}`
     }[current.verdict]

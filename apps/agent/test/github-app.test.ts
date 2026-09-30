@@ -487,10 +487,69 @@ describe('GitHub App adapter', () => {
     })
   })
 
-  it("reads a branch's review rules and whether patchtogo can bypass each ruleset", async () => {
+  it('limits the release environment to the base branches and drops any other branch policy', async () => {
+    const environment = '/repos/patchtogo-ai/escape-html/environments/patchtogo-release'
+    const { github, calls } = fakeGitHub(
+      on('PUT', environment, 200, { name: 'patchtogo-release' }),
+      on('GET', `${environment}/deployment-branch-policies`, 200, {
+        total_count: 3,
+        branch_policies: [
+          { id: 1, name: 'ptg/base/*/*', type: 'branch' },
+          { id: 2, name: '*', type: 'branch' },
+          { id: 3, name: 'ptg/base/*/*', type: 'tag' }
+        ]
+      }),
+      on('DELETE', `${environment}/deployment-branch-policies/2`, 204),
+      on('DELETE', `${environment}/deployment-branch-policies/3`, 204)
+    )
+
+    await github.ensureEnvironment(into, { name: 'patchtogo-release', branches: ['ptg/base/*/*'] })
+
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+      [
+        'PUT',
+        environment,
+        { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }
+      ],
+      ['DELETE', `${environment}/deployment-branch-policies/2`, undefined],
+      ['DELETE', `${environment}/deployment-branch-policies/3`, undefined]
+    ])
+  })
+
+  it('creates the base branch policy of a new release environment', async () => {
+    const environment = '/repos/patchtogo-ai/escape-html/environments/patchtogo-release'
+    const { github, calls } = fakeGitHub(
+      on('PUT', environment, 200, { name: 'patchtogo-release' }),
+      on('GET', `${environment}/deployment-branch-policies`, 200, {
+        total_count: 0,
+        branch_policies: []
+      }),
+      on('POST', `${environment}/deployment-branch-policies`, 200, { id: 4 })
+    )
+
+    await github.ensureEnvironment(into, { name: 'patchtogo-release', branches: ['ptg/base/*/*'] })
+
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
+      { name: 'ptg/base/*/*', type: 'branch' }
+    ])
+  })
+
+  it("reads a branch's review rules, their reviewer teams and whether patchtogo can bypass each ruleset", async () => {
+    const teamRule = reviewRule(2)
     const { github, calls } = fakeGitHub(
       on('GET', '/repos/patchtogo-ai/escape-html/rules/branches/ptg/base/escape-html/1.0.3', 200, [
-        { ...reviewRule(2), ruleset_source_type: 'Organization', ruleset_id: 11 },
+        {
+          ...teamRule,
+          parameters: {
+            ...teamRule.parameters,
+            required_reviewers: [
+              { reviewer: { id: 7, type: 'Team' }, file_patterns: ['*'], minimum_approvals: 2 },
+              { reviewer: { id: 8, type: 'Team' }, file_patterns: ['docs/*'], minimum_approvals: 1 }
+            ]
+          },
+          ruleset_source_type: 'Organization',
+          ruleset_id: 11
+        },
         { type: 'deletion', ruleset_source_type: 'Organization', ruleset_id: 11 },
         { ...reviewRule(1), ruleset_source_type: 'Repository', ruleset_id: 12 }
       ]),
@@ -501,14 +560,30 @@ describe('GitHub App adapter', () => {
       on('GET', '/repos/patchtogo-ai/escape-html/rulesets/12', 200, {
         id: 12,
         current_user_can_bypass: 'always'
-      })
+      }),
+      on('GET', '/orgs/patchtogo-ai/teams', 200, [{ id: 7, slug: 'reviewers' }])
     )
 
     const rules = await github.branchReviewRules(into, 'ptg/base/escape-html/1.0.3')
 
     expect(rules).toEqual([
-      { approvals: 2, codeOwnerReview: true, lastPushApproval: true, bypass: 'never' },
-      { approvals: 1, codeOwnerReview: true, lastPushApproval: true, bypass: 'always' }
+      {
+        approvals: 2,
+        codeOwnerReview: true,
+        lastPushApproval: true,
+        bypass: 'never',
+        teamReviews: [
+          { team: 'reviewers', approvals: 2, filePatterns: ['*'] },
+          { team: null, approvals: 1, filePatterns: ['docs/*'] }
+        ]
+      },
+      {
+        approvals: 1,
+        codeOwnerReview: true,
+        lastPushApproval: true,
+        bypass: 'always',
+        teamReviews: []
+      }
     ])
     const lookups = calls.filter((c) => c.path.includes('/rulesets/'))
     expect(lookups.map((c) => c.query.get('includes_parents'))).toEqual(['true', 'true'])

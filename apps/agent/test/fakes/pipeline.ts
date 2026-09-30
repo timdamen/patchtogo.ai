@@ -1,4 +1,5 @@
 import type { Advisory } from '../../src/advisory.ts'
+import type { Classification } from '../../src/comment-classification.ts'
 import { InMemoryStore } from '../../src/pipeline/memory-store.ts'
 import type { Automation } from '../../src/pipeline/automation.ts'
 import { createPipeline, type PipelineSettings } from '../../src/pipeline/pipeline.ts'
@@ -8,7 +9,7 @@ import { ScriptedBuilder } from './builder.ts'
 import { FakeClock } from './clock.ts'
 import { RecordingModelAccess, ScriptedFixer } from './fixer.ts'
 import { InMemoryGitHub } from './github.ts'
-import { triageModel } from './model.ts'
+import { classificationModel, triageModel } from './model.ts'
 import { RecordingNotifier } from './notifier.ts'
 import { FakeRegistry } from './registry.ts'
 
@@ -18,6 +19,7 @@ interface TestPipelineOptions {
   store?: Store
   automation?: Automation
   upstreamAccount?: boolean
+  classify?: (comments: string[]) => Classification
 }
 
 const testSettings: PipelineSettings = {
@@ -36,7 +38,8 @@ export function createTestPipeline({
   fixes,
   store = new InMemoryStore(),
   automation = testSettings.automation,
-  upstreamAccount = false
+  upstreamAccount = false,
+  classify = () => ({ actionable: true, reply: '' })
 }: TestPipelineOptions = {}) {
   const github = new InMemoryGitHub()
   const ports = {
@@ -46,6 +49,7 @@ export function createTestPipeline({
     fixer: new ScriptedFixer(fixes),
     modelAccess: new RecordingModelAccess(),
     model: triageModel(triage),
+    smallModel: classificationModel(classify),
     store,
     notifier: new RecordingNotifier(),
     clock: new FakeClock(),

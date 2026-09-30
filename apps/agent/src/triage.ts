@@ -1,3 +1,4 @@
+import { tagged } from '@patchtogo/fixer-runner/protocol'
 import { generateText, Output, type LanguageModel } from 'ai'
 import { z } from 'zod'
 import type { Advisory } from './advisory.ts'
@@ -90,7 +91,7 @@ export async function triageAdvisory(
   const { output, totalUsage } = await generateText({
     model,
     system,
-    prompt: `${note}<advisory>\n${JSON.stringify(advisory, null, 2)}\n</advisory>`,
+    prompt: `${note}${tagged('advisory', JSON.stringify(advisory, null, 2))}`,
     output: Output.object({ schema: triageSchema })
   })
   return {

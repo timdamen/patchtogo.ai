@@ -134,3 +134,19 @@ export const runnerEventSchema = z.object({
 })
 
 export type RunnerEvent = z.infer<typeof runnerEventSchema>
+
+const promptTags = [
+  'advisory',
+  'triage',
+  'reviewer-instruction',
+  'untrusted-comment',
+  'reviewer-comment'
+] as const
+
+type PromptTag = (typeof promptTags)[number]
+
+const promptTag = new RegExp(`<\\s*(\\/?)\\s*(${promptTags.join('|')})\\b`, 'gi')
+
+export function tagged(tag: PromptTag, body: string): string {
+  return `<${tag}>\n${body.replaceAll(promptTag, '‹$1$2')}\n</${tag}>`
+}

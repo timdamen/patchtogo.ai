@@ -24,12 +24,12 @@ const nextStates: Record<RunState, readonly RunState[]> = {
   detected: ['triaged'],
   triaged: ['skipped', 'needs-human', 'forking'],
   skipped: [],
-  'needs-human': [],
+  'needs-human': ['approved'],
   forking: ['verifying', 'needs-human'],
   verifying: ['fixing', 'needs-human'],
   fixing: ['fixing', 'in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],
-  approved: ['released'],
+  approved: ['approved', 'released', 'needs-human'],
   released: ['upstreamed', 'superseded'],
   upstreamed: ['superseded'],
   superseded: [],
@@ -97,6 +97,18 @@ export interface ReviewLoop {
   handOver: { by: string; url: string } | null
 }
 
+export interface WorkflowRun {
+  id: number
+  url: string
+  conclusion: string
+}
+
+export interface StableRelease {
+  commit: string
+  workflow?: WorkflowRun
+  version?: string
+}
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
@@ -106,6 +118,7 @@ export interface RunDetails {
   patchBranch?: BaseBranch
   pullRequest?: PullRequest
   review?: ReviewLoop
+  stable?: StableRelease
 }
 
 export interface RunFailure {

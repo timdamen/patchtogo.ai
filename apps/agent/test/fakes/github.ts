@@ -13,6 +13,7 @@ import type {
   RepoRef,
   Review,
   ReviewComment,
+  ReviewRule,
   ReviewState
 } from '../../src/pipeline/ports.ts'
 
@@ -63,7 +64,17 @@ export interface NewReview {
 
 export const BOT_LOGIN = 'patchtogo-bot[bot]'
 
+export interface FakeRuleset {
+  branchPrefix: string
+  rule: ReviewRule
+}
+
 type Method = Exclude<keyof GitHub, 'getAdvisory'>
+
+export const baseBranchRuleset: FakeRuleset = {
+  branchPrefix: 'ptg/base/',
+  rule: { approvals: 2, codeOwnerReview: true, lastPushApproval: true, bypass: 'never' }
+}
 
 function key({ owner, repo }: RepoRef): string {
   return `${owner}/${repo}`.toLowerCase()
@@ -75,6 +86,7 @@ export class InMemoryGitHub implements GitHub {
   readonly commits = new Map<string, FakeCommit>()
   readonly pullRequests: FakePullRequest[] = []
   readonly comments: FakeComment[] = []
+  rulesets: FakeRuleset[] = [baseBranchRuleset]
   readonly calls: { method: Method; repo: string }[] = []
   readonly #teamMembers = new Set<string>()
   readonly #reviews = new Map<string, Review>()
@@ -159,6 +171,16 @@ export class InMemoryGitHub implements GitHub {
     if (!repository || !parent) throw new Error(`no branch ${branch} in ${key(ref)}`)
     const sha = this.#commit(parent.sha, message, { ...parent.files, ...files })
     repository.branches.set(branch, sha)
+    return sha
+  }
+
+  mergePullRequest(ref: RepoRef, number: number): string {
+    const repository = this.repository(ref)
+    const pr = this.pullRequests.find((p) => p.repo === key(ref) && p.number === number)
+    const head = this.commits.get(repository?.branches.get(pr?.head ?? '') ?? '')
+    if (!repository || !pr || !head) throw new Error(`no pull request ${number} to merge`)
+    const sha = this.#commit(head.sha, `Merge pull request #${number}`, head.files)
+    repository.branches.set(pr.base, sha)
     return sha
   }
 
@@ -275,6 +297,9 @@ export class InMemoryGitHub implements GitHub {
 
   async updateBranch(repo: RepoRef, branch: NewBranch): Promise<string> {
     const repository = this.#existing(repo, 'updateBranch')
+    if (this.rulesets.some((ruleset) => branch.name.startsWith(ruleset.branchPrefix))) {
+      throw new Error(`a ruleset requires a pull request to change ${branch.name}`)
+    }
     const head = repository.branches.get(branch.name)
     if (head !== branch.parent) {
       throw new Error(`${branch.name} is at ${head ?? 'nothing'}, not ${branch.parent}`)
@@ -383,5 +408,12 @@ export class InMemoryGitHub implements GitHub {
     if (!found) throw new Error(`no pull request ${pullRequest}`)
     if (!repository.teams.has(team)) throw new Error(`${team} cannot access ${key(repo)}`)
     if (!found.reviewTeams.includes(team)) found.reviewTeams.push(team)
+  }
+
+  async branchReviewRules(repo: RepoRef, branch: string): Promise<ReviewRule[]> {
+    this.#existing(repo, 'branchReviewRules')
+    return this.rulesets
+      .filter((ruleset) => branch.startsWith(ruleset.branchPrefix))
+      .map((ruleset) => ({ ...ruleset.rule }))
   }
 }

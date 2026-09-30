@@ -12,7 +12,7 @@ patchtogo is being set up. This page describes the intended flow, not a running 
 4. **Fix and pull request.** In a sandbox, the agent writes the patch and an exploit regression test. The sandbox then re-runs that test itself: it has to fail on the base branch and pass with the fix. Only then does the agent commit the diff to a patch branch, `ptg/patch/<name>/<version>/<ghsa-id>`, and open a public pull request against the base branch. The pull request describes the vulnerability, the triage reasoning, the fix strategy and the test results, and requests a review from the reviewer team. A fix that doesn't go from red to green, or whose diff touches the scaffolding (workflows, CODEOWNERS, the notice), goes to a human instead.
 5. **Preview release.** Every commit on the pull request is published as a preview build through [pkg.pr.new](https://pkg.pr.new), and the pull request description carries the install link for the first one. Previews are **unreviewed** and meant as an emergency stopgap: their version is the patched version plus `.preview-<commit>`, and their README opens with an "unreviewed preview" warning. See [Preview builds](#preview-builds).
 6. **Review.** Reviewers comment on the pull request and the agent iterates on their feedback. Only comments from the reviewer team are treated as instructions. See [the review loop](#the-review-loop).
-7. **Stable release.** After two approvals a human merges, and GitHub Actions publishes `@patchtogo.ai/<package>` with npm provenance.
+7. **Stable release.** After two approvals from the reviewer team a human merges, and GitHub Actions publishes `@patchtogo.ai/<package>` with npm provenance, so the tarball traces back to the merge commit. See [Stable releases](#stable-releases).
 
 ## The review loop
 
@@ -44,7 +44,7 @@ pnpm reads the same mapping from `overrides` in `pnpm-workspace.yaml`, and Yarn 
 
 - An unscoped package `foo` is published as `@patchtogo.ai/foo`, and a scoped package `@scope/foo` as `@patchtogo.ai/scope__foo`.
 - Versions are the upstream version plus `-ptg.N`, where N counts patchtogo's stable releases of that upstream version. They are prereleases in semver terms, so pin the exact version in your overrides.
-- Each fork has a base branch per upstream version, `ptg/base/<name>/<version>` (with `<name>` being `foo` or `scope__foo`). It holds the upstream release plus one "patchtogo scaffolding" commit: the rename and version, `repository` pointing at the fork, an unofficial-fork banner in the README, a `PATCHTOGO.md` attribution and licence notice, CODEOWNERS for the reviewer team, and the patchtogo preview workflow instead of the upstream workflows. Patch pull requests target that branch, so their diff shows only the fix.
+- Each fork has a base branch per upstream version, `ptg/base/<name>/<version>` (with `<name>` being `foo` or `scope__foo`). It holds the upstream release plus one "patchtogo scaffolding" commit: the rename and version, `repository` pointing at the fork, an unofficial-fork banner in the README, a `PATCHTOGO.md` attribution and licence notice, CODEOWNERS for the reviewer team, and the patchtogo preview and stable release workflows instead of the upstream workflows. Patch pull requests target that branch, so their diff shows only the fix.
 
 ## Preview builds
 
@@ -57,7 +57,44 @@ The scaffolding commit adds `.github/workflows/patchtogo-preview.yml` to the bas
 
 Install a preview with the link from the pull request, for example `npm i https://pkg.pr.new/patchtogo-ai/escape-html/@patchtogo.ai/escape-html@<commit>`. pkg.pr.new also comments on the pull request with the link for the latest commit.
 
-Base branches cut before the preview workflow existed get it when a later run reuses them: the agent adds the missing workflow in one "update the patchtogo scaffolding" commit on top of the base branch and changes nothing else. It only adds missing files and never overwrites a workflow that is present, so changes to a workflow on an existing base branch go through a reviewed pull request. An open patch pull request cut from the older base branch keeps its old head until it is rebased onto the updated base branch.
+Base branches cut before a patchtogo workflow existed get it when a later run reuses them. The agent only adds missing files and never overwrites a workflow that is present, so changes to a workflow on an existing base branch go through a reviewed pull request:
+
+- On a base branch that isn't protected yet, it adds the missing workflows in one "update the patchtogo scaffolding" commit on top of the base branch and changes nothing else.
+- On a protected base branch it can't push, so it opens that same commit as a pull request from `ptg/scaffolding/<name>/<version>`, requests the reviewer team and fails the run at `verifying` with the link. Once reviewers have merged it, `pnpm --filter agent retry <run>` carries on. It never asks for a way around the protection.
+
+Neither kind of update publishes anything (see [Stable releases](#stable-releases)). An open patch pull request cut from the older base branch keeps its old head until it is rebased onto the updated base branch.
+
+## Stable releases
+
+The scaffolding commit also adds `.github/workflows/patchtogo-release.yml`. The workflow:
+
+- runs on pushes to `ptg/base/**` in the patchtogo fork, and a first `gate` job asks GitHub which pull request the pushed commit merged. Only the merge of a patch pull request (head `ptg/patch/…` in the same fork) goes on; the push that creates a base branch, a scaffolding update and anything else pushed to a base branch publish nothing. Every job also checks that it runs in the patchtogo fork.
+- builds in one job and publishes in another. The `gate` job reads pull requests, the `build` job reads the repository and runs the package's own build with the same script as the tarball-match check, and only the `publish` job may request an OIDC token (`id-token: write`). The publish job doesn't check out or build anything: it downloads the tarball and runs `npm publish --provenance --access public --tag latest --ignore-scripts`. There is no npm token anywhere; npm trusted publishing swaps the job's OIDC token for a short-lived one.
+- picks the version itself. It asks npm for the versions already published and releases `<upstream version>-ptg.<N+1>`, so a later fix for the same upstream version gets the next number. It also records the merge commit as `gitHead` in the published `package.json`.
+- pins every action to a commit SHA, and runs the releases of one base branch one after another.
+
+`-ptg.N` versions are semver prereleases, so the workflow always passes `--tag latest`, and consumers pin the exact version in their overrides.
+
+The agent follows along through webhooks. Merging the patch pull request moves the run to `approved`. When the workflow run for that merge commit completes, the agent looks the package up on npm, and a version whose `gitHead` is the merge commit moves the run to `released`. A failed workflow run moves it to `failed` at the `approved` step, with the link to the workflow run. If someone re-runs the failed jobs and they succeed, the run continues without a retry; `pnpm --filter agent retry <run>` checks npm again, for example when that webhook was missed. The agent never merges and never publishes: the release is the workflow's job, started by a human's merge.
+
+A patch pull request closed without being merged ends the review loop: the run moves to needs-human, and reopening the pull request doesn't resume it. A pull request the agent handed over to humans is still followed, so it's released when they merge it.
+
+### The first release of a package
+
+npm trusted publishing can only be set up for a package that already exists on npm, and npm can't trust a whole scope. When a patch pull request for a package that isn't on npm yet is merged, the run moves to needs-human with the commands for its package, and the release workflow for that merge fails. Once per package, an owner of the npm scope (npm 11.15 or later, 2FA on) runs:
+
+```bash
+mkdir ptg-seed && cd ptg-seed && npm init -y >/dev/null
+npm pkg set name=@patchtogo.ai/escape-html version=0.0.0-ptg.0 \
+  description="patchtogo placeholder, not a release" \
+  repository.type=git repository.url=git+https://github.com/patchtogo-ai/escape-html.git
+npm publish --access public --tag bootstrap
+npm deprecate @patchtogo.ai/escape-html@0.0.0-ptg.0 "patchtogo placeholder, not a release"
+npm trust github @patchtogo.ai/escape-html --repo patchtogo-ai/escape-html \
+  --file patchtogo-release.yml --allow-publish --yes
+```
+
+and sets the package's publishing access to "Require two-factor authentication and disallow tokens" on npmjs.com. Re-running the failed jobs of the release workflow then publishes the real release, and the run moves to `released`. `pnpm --filter agent retry <run>` resumes the run too; it then waits for the next successful workflow run.
 
 ## Automation level
 

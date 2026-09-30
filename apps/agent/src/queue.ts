@@ -29,6 +29,8 @@ function eventKey(event: PipelineEvent): string {
       return event.ghsaId
     case 'retry-requested':
       return ghsaIdOf(event.runId)
+    case 'stable-release-completed':
+      return repoName(event.repository)
     default:
       return (
         ghsaIdOfPatchBranch(event.pullRequest.head) ??

@@ -84,4 +84,15 @@ export function forwardPullRequestFeedback(
       sender: authorOf(sender)
     })
   })
+
+  webhooks.on('pull_request.closed', async ({ payload }) => {
+    const { pull_request, repository } = payload
+    const pullRequest = patchPullRequest(repository, pull_request.number, pull_request.head.ref)
+    if (!pullRequest) return
+    await emit({
+      type: 'pull-request-closed',
+      pullRequest,
+      mergeCommit: pull_request.merged ? pull_request.merge_commit_sha : null
+    })
+  })
 }

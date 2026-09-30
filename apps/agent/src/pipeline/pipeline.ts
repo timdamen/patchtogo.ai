@@ -1,7 +1,13 @@
 import { npmAdvisories } from '../advisory.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
 import type { Automation } from './automation.ts'
-import type { PipelineEvent, PullRequestFeedback } from './events.ts'
+import { sameRepository } from '../upstream.ts'
+import type {
+  PipelineEvent,
+  PullRequestClosed,
+  PullRequestFeedback,
+  StableReleaseCompleted
+} from './events.ts'
 import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
 import { reviewLoop } from './review.ts'
@@ -16,7 +22,8 @@ import {
   type Step,
   type Transition
 } from './patch-run.ts'
-import { StaleRunError, type Ports } from './ports.ts'
+import { StaleRunError, type Ports, type RepoRef } from './ports.ts'
+import { releasingSteps } from './releasing.ts'
 
 export interface Pipeline {
   handle(event: PipelineEvent): Promise<void>
@@ -31,6 +38,8 @@ const triageOutcomes = {
   skip: 'skipped',
   'needs-human': 'needs-human'
 } as const satisfies Record<Triage['decision'], RunState>
+
+const releaseStates: readonly RunState[] = ['approved', 'failed', 'needs-human']
 
 export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
   const { github, store, notifier, clock } = ports
@@ -59,7 +68,8 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     },
     ...forkingSteps(ports, settings),
     ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {}),
-    'in-review': review.step
+    'in-review': review.step,
+    ...releasingSteps(ports, settings)
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {
@@ -101,6 +111,78 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     }
   }
 
+  async function move(run: PatchRun, next: Transition): Promise<void> {
+    const updated = transition(run, next, clock.now())
+    if (await save(updated)) await advance(updated)
+  }
+
+  async function resumeFailed(run: PatchRun): Promise<PatchRun | undefined> {
+    if (run.state !== 'failed') return run
+    const next = retry(run, clock.now())
+    return (await save(next)) ? next : undefined
+  }
+
+  async function runsOf(
+    repository: RepoRef,
+    states: readonly RunState[],
+    matches: (run: PatchRun) => boolean
+  ): Promise<PatchRun[]> {
+    const runs: PatchRun[] = []
+    for (const state of states) runs.push(...(await store.listRuns({ state })))
+    return runs.filter((run) => run.fork && sameRepository(run.fork, repository) && matches(run))
+  }
+
+  async function pullRequestClosed({ pullRequest, mergeCommit }: PullRequestClosed): Promise<void> {
+    const run = await review.runFor(pullRequest)
+    if (!run || run.stable) return
+    const state = run.state === 'failed' ? run.failure?.step : run.state
+    const url = run.pullRequest?.url
+    if (mergeCommit ? state !== 'in-review' && state !== 'needs-human' : state !== 'in-review') {
+      return
+    }
+    const current = await resumeFailed(run)
+    if (!current) return
+    if (mergeCommit) {
+      return move(current, {
+        to: 'approved',
+        reason: `${url} was merged as ${mergeCommit}; waiting for the stable release workflow.`,
+        details: { stable: { commit: mergeCommit } }
+      })
+    }
+    const reason = `${url} was closed without being merged, so the agent stopped working on it. Reopening the PR does not resume the run.`
+    await move(current, { to: 'needs-human', reason })
+    await notifier.notify({
+      type: 'needs-human',
+      runId: run.id,
+      ghsaId: run.ghsaId,
+      packageName: run.packageName,
+      reason
+    })
+  }
+
+  async function stableReleaseCompleted(event: StableReleaseCompleted): Promise<void> {
+    const { repository, workflowRun } = event
+    if (event.trigger !== 'push' || !sameRepository(event.headRepository, repository)) return
+    const succeeded = workflowRun.conclusion === 'success'
+    const runs = await runsOf(
+      repository,
+      releaseStates,
+      (run) => run.baseBranch?.name === event.branch && run.stable?.commit === event.commit
+    )
+    for (const run of runs) {
+      const waiting = run.state === 'approved'
+      const heldBack = run.state === 'needs-human' || run.failure?.step === 'approved'
+      if (!waiting && !(succeeded && heldBack)) continue
+      const current = await resumeFailed(run)
+      if (!current?.stable) continue
+      await move(current, {
+        to: 'approved',
+        reason: `The stable release workflow ended with ${workflowRun.conclusion}: ${workflowRun.url}`,
+        details: { stable: { ...current.stable, workflow: workflowRun } }
+      })
+    }
+  }
+
   async function advisoryPublished(ghsaId: string): Promise<void> {
     const advisory = await github.getAdvisory(ghsaId)
     if (!advisory) return
@@ -112,8 +194,15 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
   async function retryRequested(id: string): Promise<void> {
     const run = await store.getRun(id)
     if (!run) throw new Error(`no patch run ${id}`)
+    if (run.state === 'needs-human' && run.stable) {
+      return move(run, {
+        to: 'approved',
+        reason: 'The operator resumed the release.',
+        details: { stable: { commit: run.stable.commit } }
+      })
+    }
     if (run.state !== 'failed') {
-      if (isTerminal(run.state)) {
+      if (run.state === 'needs-human' || isTerminal(run.state)) {
         throw new IllegalTransitionError(
           `patch run ${run.id} is ${run.state}, so it cannot be retried`
         )
@@ -141,6 +230,10 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
         case 'review-comment-created':
         case 'pull-request-labeled':
           return feedbackReceived(event)
+        case 'pull-request-closed':
+          return pullRequestClosed(event)
+        case 'stable-release-completed':
+          return stableReleaseCompleted(event)
       }
     }
   }

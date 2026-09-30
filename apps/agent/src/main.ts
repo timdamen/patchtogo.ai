@@ -27,6 +27,7 @@ import { createPgRevocationStore } from './postgres/revocations.ts'
 import { PostgresStore } from './postgres/store.ts'
 import { forwardPullRequestFeedback } from './pull-request-webhook.ts'
 import { createPipelineQueue } from './queue.ts'
+import { forwardStableReleases } from './release-webhook.ts'
 import type { Fixer } from './pipeline/ports.ts'
 import { createRunTokens, runTokenAccess } from './run-tokens.ts'
 import { createServer } from './server.ts'
@@ -114,6 +115,7 @@ webhooks.onAny(({ id, name }) => {
 })
 forwardSecurityAdvisories(webhooks, queue.send)
 forwardPullRequestFeedback(webhooks, queue.send, github)
+forwardStableReleases(webhooks, queue.send)
 
 const poller = createAdvisoryPoller({
   updatedSince: (since) => npmAdvisoriesUpdatedSince(since, githubApi),

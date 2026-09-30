@@ -10,7 +10,7 @@ patchtogo is being set up. This page describes the intended flow, not a running 
 2. **Triage.** A deterministic check runs first, without a model: a package is only a candidate while its latest version on npm still falls inside the vulnerable range. An advisory without a "first patched version" is not enough, because many of those are stale (newer releases already left the range). Malware advisories are never candidates, and a range the check can't parse goes to a human rather than being guessed. For the remaining packages the agent decides whether a small, behaviour-preserving fix can close the issue.
 3. **Fork and verify.** The package's repository is forked into the [patchtogo-ai](https://github.com/patchtogo-ai) organisation and checked out at the commit of the latest vulnerable release. That commit is built in a sandbox, and its packed files are compared with the published npm tarball, so the patch applies to what users actually run. A package without a public GitHub repository, without a commit or tag for the release, or whose build differs from the tarball goes to a human instead.
 4. **Fix and pull request.** In a sandbox, the agent writes the patch and an exploit regression test. The sandbox then re-runs that test itself: it has to fail on the base branch and pass with the fix. Only then does the agent commit the diff to a patch branch, `ptg/patch/<name>/<version>/<ghsa-id>`, and open a public pull request against the base branch. The pull request describes the vulnerability, the triage reasoning, the fix strategy and the test results, and requests a review from the reviewer team. A fix that doesn't go from red to green, or whose diff touches the scaffolding (workflows, CODEOWNERS, the notice), goes to a human instead.
-5. **Preview release.** Every commit on the pull request is published as a preview build. Previews are **unreviewed** and meant as an emergency stopgap.
+5. **Preview release.** Every commit on the pull request is published as a preview build through [pkg.pr.new](https://pkg.pr.new), and the pull request description carries the install link for the first one. Previews are **unreviewed** and meant as an emergency stopgap: their version is the patched version plus `.preview-<commit>`, and their README opens with an "unreviewed preview" warning. See [Preview builds](#preview-builds).
 6. **Review.** Reviewers comment on the pull request and the agent iterates on their feedback. Only comments from the reviewer team are treated as instructions.
 7. **Stable release.** After two approvals a human merges, and GitHub Actions publishes `@patchtogo.ai/<package>` with npm provenance.
 
@@ -32,7 +32,20 @@ pnpm reads the same mapping from `overrides` in `pnpm-workspace.yaml`, and Yarn 
 
 - An unscoped package `foo` is published as `@patchtogo.ai/foo`, and a scoped package `@scope/foo` as `@patchtogo.ai/scope__foo`.
 - Versions are the upstream version plus `-ptg.N`, where N counts patchtogo's stable releases of that upstream version. They are prereleases in semver terms, so pin the exact version in your overrides.
-- Each fork has a base branch per upstream version, `ptg/base/<name>/<version>` (with `<name>` being `foo` or `scope__foo`). It holds the upstream release plus one "patchtogo scaffolding" commit: the rename and version, `repository` pointing at the fork, an unofficial-fork banner in the README, a `PATCHTOGO.md` attribution and licence notice, CODEOWNERS for the reviewer team, and no upstream workflows. Patch pull requests target that branch, so their diff shows only the fix.
+- Each fork has a base branch per upstream version, `ptg/base/<name>/<version>` (with `<name>` being `foo` or `scope__foo`). It holds the upstream release plus one "patchtogo scaffolding" commit: the rename and version, `repository` pointing at the fork, an unofficial-fork banner in the README, a `PATCHTOGO.md` attribution and licence notice, CODEOWNERS for the reviewer team, and the patchtogo preview workflow instead of the upstream workflows. Patch pull requests target that branch, so their diff shows only the fix.
+
+## Preview builds
+
+The scaffolding commit adds `.github/workflows/patchtogo-preview.yml` to the base branch, so every patch branch inherits it. The workflow:
+
+- runs only on pushes to `ptg/patch/**` branches in the fork itself. It has no `pull_request` or `pull_request_target` trigger, so a pull request from someone else's fork never builds or publishes anything, and each job checks that it runs in the patchtogo fork, so a fork of the fork that enables Actions does not publish either. Only the agent, the reviewer team and organisation owners can push to the fork.
+- holds no secrets and no `id-token` permission. The build job reads the repository (`contents: read`), and the publish job gets no token permissions at all. pkg.pr.new authenticates the upload through its own GitHub App, which checks that the workflow run is real.
+- builds the package with the same script as the tarball-match check (lockfile-aware install, the `build` script, pack), in the package's directory, after setting the version to `<version>-ptg.N.preview-<commit>` and prepending the warning to the README. The build job hands the tarball to a separate publish job, which runs a pinned `pkg-pr-new` without checking out or building anything.
+- pins every action to a commit SHA.
+
+Install a preview with the link from the pull request, for example `npm i https://pkg.pr.new/patchtogo-ai/escape-html/@patchtogo.ai/escape-html@<commit>`. pkg.pr.new also comments on the pull request with the link for the latest commit.
+
+Base branches cut before the preview workflow existed get it when a later run reuses them: the agent adds the missing workflow in one "update the patchtogo scaffolding" commit on top of the base branch and changes nothing else. It only adds missing files and never overwrites a workflow that is present, so changes to a workflow on an existing base branch go through a reviewed pull request. An open patch pull request cut from the older base branch keeps its old head until it is rebased onto the updated base branch.
 
 ## Automation level
 

@@ -108,6 +108,17 @@ export class InMemoryGitHub implements GitHub {
     return sha
   }
 
+  #apply(parentSha: string, changes: NewBranch['changes']): Record<string, string> {
+    const parent = this.commits.get(parentSha)
+    if (!parent) throw new Error(`no commit ${parentSha}`)
+    const files = { ...parent.files }
+    for (const change of changes) {
+      if ('delete' in change) delete files[change.path]
+      else files[change.path] = change.content
+    }
+    return files
+  }
+
   #track(method: Method, repo: RepoRef): FakeRepository | undefined {
     this.calls.push({ method, repo: key(repo) })
     const failure = this.#failures.get(method)
@@ -187,14 +198,22 @@ export class InMemoryGitHub implements GitHub {
     const repository = this.#existing(repo, 'createBranch')
     const existing = repository.branches.get(branch.name)
     if (existing) return existing
-    const parent = this.commits.get(branch.parent)
-    if (!parent) throw new Error(`no commit ${branch.parent}`)
-    const files = { ...parent.files }
-    for (const change of branch.changes) {
-      if ('delete' in change) delete files[change.path]
-      else files[change.path] = change.content
+    const sha = this.#commit(
+      branch.parent,
+      branch.message,
+      this.#apply(branch.parent, branch.changes)
+    )
+    repository.branches.set(branch.name, sha)
+    return sha
+  }
+
+  async updateBranch(repo: RepoRef, branch: NewBranch): Promise<string> {
+    const repository = this.#existing(repo, 'updateBranch')
+    const head = repository.branches.get(branch.name)
+    if (head !== branch.parent) {
+      throw new Error(`${branch.name} is at ${head ?? 'nothing'}, not ${branch.parent}`)
     }
-    const sha = this.#commit(parent.sha, branch.message, files)
+    const sha = this.#commit(head, branch.message, this.#apply(head, branch.changes))
     repository.branches.set(branch.name, sha)
     return sha
   }

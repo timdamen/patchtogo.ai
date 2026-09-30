@@ -2,6 +2,7 @@ import { posix } from 'node:path'
 import { patchedPackageName, patchedVersion } from './naming.ts'
 import type { UpstreamRelease } from './pipeline/patch-run.ts'
 import type { FileChange, RepoRef } from './pipeline/ports.ts'
+import { PREVIEW_WORKFLOW_FILE, previewWorkflow } from './preview-workflow.ts'
 import { repoName } from './upstream.ts'
 
 export const NOTICE_FILE = 'PATCHTOGO.md'
@@ -27,6 +28,17 @@ export interface ScaffoldingInput {
 export interface Scaffolding {
   message: string
   changes: FileChange[]
+}
+
+export interface ScaffoldingFile {
+  path: string
+  content: string
+}
+
+export interface WorkflowInput {
+  release: UpstreamRelease
+  fork: RepoRef
+  readmePath: string
 }
 
 const readmePattern = /^readme(\.(md|markdown|txt))?$/i
@@ -118,10 +130,47 @@ function notice(input: ScaffoldingInput, patchedName: string, license: string | 
   ].join('\n')
 }
 
+export function packageFile(release: UpstreamRelease, file: string): string {
+  return posix.join(release.directory || '.', file)
+}
+
+export function scaffoldingWorkflows({
+  release,
+  fork,
+  readmePath
+}: WorkflowInput): ScaffoldingFile[] {
+  return [
+    {
+      path: PREVIEW_WORKFLOW_FILE,
+      content: previewWorkflow({
+        fork,
+        directory: release.directory,
+        readmePath,
+        publishedAt: release.publishedAt
+      })
+    }
+  ]
+}
+
+export function scaffoldingUpdate(
+  packageName: string,
+  release: UpstreamRelease,
+  missing: ScaffoldingFile[]
+): Scaffolding {
+  const message = [
+    `chore: update the patchtogo scaffolding for ${packageName}@${release.version}`,
+    '',
+    `Adds ${missing.map((file) => file.path).join(', ')}, which this base branch predates. Nothing else changes.`,
+    '',
+    `Patchtogo-Upstream: ${repoName(release.repository)}@${release.commit.sha}`
+  ].join('\n')
+  return { message, changes: missing.map(({ path, content }) => ({ path, content })) }
+}
+
 export function scaffolding(input: ScaffoldingInput): Scaffolding {
   const { packageName, release, fork, settings } = input
   const directory = release.directory
-  const at = (file: string) => posix.join(directory || '.', file)
+  const at = (file: string) => packageFile(release, file)
   const patchedName = patchedPackageName(packageName, settings)
   const version = patchedVersion(release.version, 1)
   const packageJson = rewritePackageJson(input.packageJson, {
@@ -136,6 +185,8 @@ export function scaffolding(input: ScaffoldingInput): Scaffolding {
   const readmePath = input.readme?.path ?? at('README.md')
   const markdown = isMarkdown(readmePath)
   const readme = `${banner(input, patchedName, markdown)}\n\n${input.readme?.text ?? `# ${patchedName}\n`}`
+  const workflows = scaffoldingWorkflows({ release, fork, readmePath })
+  const managed = new Set(workflows.map((file) => file.path))
   const changes: FileChange[] = [
     { path: at('package.json'), content: packageJson },
     { path: readmePath, content: readme },
@@ -144,12 +195,15 @@ export function scaffolding(input: ScaffoldingInput): Scaffolding {
       content: notice(input, patchedName, findLicense(input.directoryFiles))
     },
     { path: CODEOWNERS_FILE, content: `* @${fork.owner}/${settings.reviewerTeam}\n` },
-    ...input.workflowFiles.map((path) => ({ path, delete: true as const }))
+    ...input.workflowFiles
+      .filter((path) => !managed.has(path))
+      .map((path) => ({ path, delete: true as const })),
+    ...workflows
   ]
   const message = [
     `chore: patchtogo scaffolding for ${packageName}@${release.version}`,
     '',
-    `Renames the package to ${patchedName} ${version}, points repository at the fork, adds the unofficial-fork banner, the attribution notice and CODEOWNERS for the reviewer team, and removes the upstream workflows.`,
+    `Renames the package to ${patchedName} ${version}, points repository at the fork, adds the unofficial-fork banner, the attribution notice and CODEOWNERS for the reviewer team, and replaces the upstream workflows with the patchtogo preview workflow.`,
     '',
     `Patchtogo-Upstream: ${repoName(release.repository)}@${release.commit.sha}`
   ].join('\n')

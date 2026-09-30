@@ -6,7 +6,7 @@ export const BRANCH_NAMESPACE = 'ptg/'
 
 const BASE_BRANCH_PREFIX = `${BRANCH_NAMESPACE}base/`
 
-const PATCH_BRANCH_PREFIX = `${BRANCH_NAMESPACE}patch/`
+export const PATCH_BRANCH_PREFIX = `${BRANCH_NAMESPACE}patch/`
 
 export function packageSlug(packageName: string): string {
   const scoped = /^@([^/]+)\/(.+)$/.exec(packageName)

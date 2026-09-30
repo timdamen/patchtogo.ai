@@ -43,6 +43,7 @@ export interface GitHub {
   grantTeamAccess(repo: RepoRef, team: string): Promise<void>
   getBranch(repo: RepoRef, branch: string): Promise<string | undefined>
   createBranch(repo: RepoRef, branch: NewBranch): Promise<string>
+  updateBranch(repo: RepoRef, branch: NewBranch): Promise<string>
   listBranches(repo: RepoRef): Promise<string[]>
   deleteBranch(repo: RepoRef, branch: string): Promise<void>
   setDefaultBranch(repo: RepoRef, branch: string): Promise<void>

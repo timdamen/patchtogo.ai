@@ -189,6 +189,38 @@ describe('GitHub App adapter', () => {
     expect(head).toBe(sha('d'))
   })
 
+  it('adds one commit to an existing branch and moves it without forcing', async () => {
+    const { github, calls } = fakeGitHub(
+      on('GET', `/repos/patchtogo-ai/escape-html/git/commits/${sha('a')}`, 200, {
+        tree: { sha: sha('t') }
+      }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/trees', 201, { sha: sha('u') }),
+      on('POST', '/repos/patchtogo-ai/escape-html/git/commits', 201, { sha: sha('c') }),
+      on(
+        'PATCH',
+        '/repos/patchtogo-ai/escape-html/git/refs/heads/ptg/base/escape-html/1.0.3',
+        200,
+        {
+          object: { sha: sha('c') }
+        }
+      )
+    )
+
+    const head = await github.updateBranch(into, {
+      name: 'ptg/base/escape-html/1.0.3',
+      parent: sha('a'),
+      message: 'chore: update the patchtogo scaffolding',
+      changes: [{ path: '.github/workflows/patchtogo-preview.yml', content: 'on: push\n' }]
+    })
+
+    expect(head).toBe(sha('c'))
+    expect(calls.find((c) => c.path.endsWith('/git/commits') && c.method === 'POST')?.body).toEqual(
+      { message: 'chore: update the patchtogo scaffolding', tree: sha('u'), parents: [sha('a')] }
+    )
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ sha: sha('c'), force: false })
+    expect(calls.some((c) => c.path.endsWith('/git/refs') && c.method === 'POST')).toBe(false)
+  })
+
   it('keeps the file mode a change asks for', async () => {
     const { github, calls } = fakeGitHub(
       on('GET', `/repos/patchtogo-ai/escape-html/git/commits/${sha('a')}`, 200, {

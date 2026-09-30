@@ -1,6 +1,7 @@
 import { patchedPackageName, type NamingSettings } from './naming.ts'
 import type { FixOutcome, PatchRun, UpstreamRelease } from './pipeline/patch-run.ts'
 import type { RepoRef, TestResult } from './pipeline/ports.ts'
+import { previewInstallUrl } from './preview-workflow.ts'
 import type { Triage } from './triage.ts'
 import { repoName } from './upstream.ts'
 
@@ -10,6 +11,7 @@ export interface PatchPrInput {
   release: UpstreamRelease
   fork: RepoRef
   baseBranch: string
+  patchCommit: string
   fix: FixOutcome
   settings: NamingSettings & { forkOrg: string; reviewerTeam: string }
 }
@@ -65,6 +67,7 @@ export function patchPrBody({
   release,
   fork,
   baseBranch,
+  patchCommit,
   fix,
   settings
 }: PatchPrInput): string {
@@ -79,6 +82,14 @@ export function patchPrBody({
     '> **Unreviewed preview.** This patch was written by an AI agent and has not been reviewed yet.',
     `> Preview builds of this pull request are not approved by the reviewer team: use one only as an emergency stopgap.`,
     `> A stable \`${patched}\` release is published only after two reviewer approvals and a human merge.`,
+    '',
+    `Unreviewed preview of the patch commit ${patchCommit.slice(0, 7)}, published by [pkg.pr.new](https://pkg.pr.new) once the preview workflow has run:`,
+    '',
+    '```sh',
+    `npm i ${previewInstallUrl(fork, patched, patchCommit)}`,
+    '```',
+    '',
+    'Later commits on this branch get their own install link in the pkg.pr.new comment below.',
     '',
     '## Vulnerability',
     '',

@@ -123,6 +123,7 @@ export function fixingSteps(
           release,
           fork,
           baseBranch: baseBranch.name,
+          patchCommit: sha,
           fix,
           settings
         })

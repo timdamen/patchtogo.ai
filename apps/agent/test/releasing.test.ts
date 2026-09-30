@@ -55,9 +55,8 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
       test.pipeline.handle(completed(commit, conclusion))
     const releaseOnNpm = (commit: string) =>
       test.registry.publish(patched, '1.0.3-ptg.1', { gitHead: commit })
-    const states = async () => (await test.store.listEvents(runId)).map((event) => event.state)
 
-    return { ...test, close, merge, complete, releaseOnNpm, states }
+    return { ...test, close, merge, complete, releaseOnNpm }
   }
 
   it('moves a merged patch PR to approved and a successful release to released', async () => {
@@ -76,20 +75,25 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
 
     expect(await test.run()).toMatchObject({
       state: 'released',
-      reason: `Published ${patched}@1.0.3-ptg.1 from ${commit}.`,
       stable: {
         commit,
         version: '1.0.3-ptg.1',
         workflow: { id: 7, url: actionsRun(7), conclusion: 'success' }
       }
     })
-    expect((await test.states()).slice(-4)).toEqual([
+    const events = await test.store.listEvents(runId)
+    const releasedAt = events.findIndex((event) => event.state === 'released')
+    expect(events[releasedAt]?.reason).toBe(`Published ${patched}@1.0.3-ptg.1 from ${commit}.`)
+    expect(events.slice(releasedAt - 3, releasedAt + 1).map((event) => event.state)).toEqual([
       'in-review',
       'approved',
       'approved',
       'released'
     ])
-    expect(test.notifier.notifications.map((n) => n.type)).toEqual(['patch-pr-opened'])
+    expect(test.notifier.notifications.map((n) => n.type)).toEqual([
+      'patch-pr-opened',
+      'upstream-pr-ready'
+    ])
   })
 
   it('fails at the approved step when the release workflow fails, and resumes when a re-run succeeds', async () => {

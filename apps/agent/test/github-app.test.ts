@@ -314,6 +314,29 @@ describe('GitHub App adapter', () => {
     expect(lookup?.query.get('state')).toBe('open')
   })
 
+  it('finds an upstream pull request from a fork branch in any state, and lists renamed files by both names', async () => {
+    const pr = { number: 12, html_url: 'https://github.com/component/escape-html/pull/12' }
+    const { github, calls } = fakeGitHub(
+      on('GET', '/repos/component/escape-html/pulls', 200, [pr]),
+      on('GET', '/repos/patchtogo-ai/escape-html/pulls/1/files', 200, [
+        { filename: 'index.js', status: 'modified' },
+        { filename: 'lib/escape.js', previous_filename: 'escape.js', status: 'renamed' }
+      ])
+    )
+
+    const found = await github.findPullRequestFrom(upstream, {
+      owner: 'patchtogo-ai',
+      branch: 'ptg/upstream/escape-html/1.0.3/ghsa-x'
+    })
+    const files = await github.pullRequestFiles(into, 1)
+
+    expect(found).toEqual({ number: 12, url: pr.html_url })
+    const lookup = calls.find((c) => c.path === '/repos/component/escape-html/pulls')
+    expect(lookup?.query.get('head')).toBe('patchtogo-ai:ptg/upstream/escape-html/1.0.3/ghsa-x')
+    expect(lookup?.query.get('state')).toBe('all')
+    expect(files).toEqual(['index.js', 'escape.js', 'lib/escape.js'])
+  })
+
   describe('the review loop', () => {
     const repo = '/repos/patchtogo-ai/escape-html'
     const branch = 'ptg/patch/escape-html/1.0.3/ghsa-x'

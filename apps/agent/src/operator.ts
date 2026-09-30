@@ -23,7 +23,8 @@ function resumable(run: PatchRun): boolean {
     (run.state === 'triaged' && run.triage?.decision === 'patch') ||
     (run.state === 'fixing' && !run.pullRequest) ||
     (run.state === 'in-review' && (run.review?.instructions.length ?? 0) > 0) ||
-    (run.state === 'needs-human' && run.stable !== undefined)
+    (run.state === 'needs-human' && run.stable !== undefined) ||
+    run.state === 'released'
   )
 }
 

@@ -77,9 +77,16 @@ export interface StableReleaseCompleted {
   workflowRun: WorkflowRun
 }
 
+export interface UpstreamVersionPublished {
+  type: 'upstream-version-published'
+  packageName: string
+  version: string
+}
+
 export type PipelineEvent =
   | AdvisoryPublished
   | RetryRequested
   | PullRequestFeedback
   | PullRequestClosed
   | StableReleaseCompleted
+  | UpstreamVersionPublished

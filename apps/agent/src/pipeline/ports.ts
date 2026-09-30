@@ -70,6 +70,11 @@ export interface MarkedComment {
   body: string
 }
 
+export interface BranchOf {
+  owner: string
+  branch: string
+}
+
 export interface ReviewRule {
   approvals: number
   codeOwnerReview: boolean
@@ -80,6 +85,7 @@ export interface ReviewRule {
 export interface GitHub {
   getAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
   getRepository(repo: RepoRef): Promise<RepoRef | undefined>
+  defaultBranch(repo: RepoRef): Promise<string | undefined>
   findCommit(repo: RepoRef, ref: string): Promise<string | undefined>
   readFile(repo: RepoRef, ref: string, path: string): Promise<string | undefined>
   listFiles(repo: RepoRef, ref: string, directory: string): Promise<string[]>
@@ -93,6 +99,8 @@ export interface GitHub {
   setDefaultBranch(repo: RepoRef, branch: string): Promise<void>
   enableActions(repo: RepoRef): Promise<void>
   findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined>
+  findPullRequestFrom(repo: RepoRef, head: BranchOf): Promise<PullRequest | undefined>
+  pullRequestFiles(repo: RepoRef, pullRequest: number): Promise<string[]>
   openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest>
   requestTeamReview(repo: RepoRef, pullRequest: number, team: string): Promise<void>
   isTeamMember(org: string, team: string, login: string): Promise<boolean>
@@ -101,6 +109,10 @@ export interface GitHub {
   moveBranch(repo: RepoRef, branch: string, move: BranchMove): Promise<boolean>
   commentOnPullRequest(repo: RepoRef, pullRequest: number, comment: MarkedComment): Promise<void>
   branchReviewRules(repo: RepoRef, branch: string): Promise<ReviewRule[]>
+}
+
+export interface UpstreamAccount {
+  openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest>
 }
 
 export interface PublishedVersion {
@@ -259,7 +271,46 @@ export interface PatchPrOpenedNotification {
   url: string
 }
 
-export type Notification = NeedsHumanNotification | PatchPrOpenedNotification
+export interface UpstreamPrReadyNotification {
+  type: 'upstream-pr-ready'
+  runId: string
+  ghsaId: string
+  packageName: string
+  compareUrl: string
+}
+
+export interface UpstreamPrOpenedNotification {
+  type: 'upstream-pr-opened'
+  runId: string
+  ghsaId: string
+  packageName: string
+  url: string
+}
+
+export interface UpstreamPrBlockedNotification {
+  type: 'upstream-pr-blocked'
+  runId: string
+  ghsaId: string
+  packageName: string
+  reason: string
+}
+
+export interface SupersededNotification {
+  type: 'superseded'
+  runId: string
+  ghsaId: string
+  packageName: string
+  version: string
+  command: string
+}
+
+export type Notification =
+  | NeedsHumanNotification
+  | PatchPrOpenedNotification
+  | UpstreamPrReadyNotification
+  | UpstreamPrOpenedNotification
+  | UpstreamPrBlockedNotification
+  | SupersededNotification
 
 export interface Notifier {
   notify(notification: Notification): Promise<void>
@@ -279,4 +330,5 @@ export interface Ports {
   store: Store
   notifier: Notifier
   clock: Clock
+  upstreamAccount?: UpstreamAccount
 }

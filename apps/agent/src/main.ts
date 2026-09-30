@@ -14,7 +14,12 @@ import { fixerSettings } from './fixer/config.ts'
 import { describeLine } from './fixer/runner-lines.ts'
 import { createSandboxFixer, modelTokenTtlMs } from './fixer/sandbox-fixer.ts'
 import { npmAdvisoriesUpdatedSince } from './github-advisories.ts'
-import { createGitHubApp, installationOctokit } from './github-app.ts'
+import {
+  createGitHubApp,
+  createUpstreamAccount,
+  installationOctokit,
+  tokenOctokit
+} from './github-app.ts'
 import { createModel } from './model.ts'
 import { createModelProxy } from './model-proxy.ts'
 import { createNpmRegistry } from './npm-registry.ts'
@@ -32,6 +37,7 @@ import type { Fixer } from './pipeline/ports.ts'
 import { createRunTokens, runTokenAccess } from './run-tokens.ts'
 import { createServer } from './server.ts'
 import { exitGracefully } from './shutdown.ts'
+import { createUpstreamWatch } from './upstream-watch.ts'
 
 const env = serverEnvSchema.parse(process.env)
 const aiEnv = aiEnvSchema.parse(process.env)
@@ -75,10 +81,13 @@ const fixer: Fixer = fixerEnv.PTG_MODEL_PROXY_URL
     })
   : { fix: () => Promise.reject(new Error('PTG_MODEL_PROXY_URL is not set')) }
 
+const registry = createNpmRegistry()
+const store = new PostgresStore(postgres.db)
+
 const pipeline = createPipeline(
   {
     github,
-    registry: createNpmRegistry(),
+    registry,
     builder: createSandboxBuilder({
       credentials: fixerConfig.credentials,
       sourceArchive: github.sourceArchive
@@ -86,11 +95,14 @@ const pipeline = createPipeline(
     fixer,
     modelAccess: runTokenAccess(runTokens, modelTokenTtlMs(fixerConfig.limits)),
     model: createModel(aiEnv),
-    store: new PostgresStore(postgres.db),
+    store,
     notifier: env.DISCORD_WEBHOOK_URL
       ? createDiscordNotifier({ webhookUrl: env.DISCORD_WEBHOOK_URL })
       : consoleNotifier,
-    clock: { now: () => new Date() }
+    clock: { now: () => new Date() },
+    upstreamAccount: pipelineEnv.PTG_UPSTREAM_TOKEN
+      ? createUpstreamAccount(tokenOctokit(pipelineEnv.PTG_UPSTREAM_TOKEN))
+      : undefined
   },
   {
     forkOrg: pipelineEnv.PTG_FORK_ORG,
@@ -126,14 +138,16 @@ const poller = createAdvisoryPoller({
   emit: queue.send
 })
 
+const upstreamWatch = createUpstreamWatch({ store, registry, emit: queue.send })
+
 const polling = new AbortController()
 
-async function pollAdvisories(): Promise<void> {
+async function repeat(name: string, task: () => Promise<string>): Promise<void> {
   while (!polling.signal.aborted) {
     try {
-      console.log(`advisory poll: ${await poller.poll()} advisories`)
+      console.log(`${name}: ${await task()}`)
     } catch (error) {
-      console.error('advisory poll failed', error)
+      console.error(`${name} failed`, error)
     }
     await sleep(env.PTG_POLL_INTERVAL_MINUTES * 60_000, undefined, {
       signal: polling.signal
@@ -150,7 +164,8 @@ await server.listen({ port: env.PORT, host: '::' })
 server.log.info(
   `automation ${pipelineEnv.PTG_AUTOMATION}, running at most ${env.PTG_MAX_CONCURRENT_RUNS} patch runs at once`
 )
-void pollAdvisories()
+void repeat('advisory poll', async () => `${await poller.poll()} advisories`)
+void repeat('upstream watch', async () => `${await upstreamWatch.check()} released packages`)
 
 exitGracefully({
   deadlineMs: 25_000,

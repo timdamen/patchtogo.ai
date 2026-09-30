@@ -75,6 +75,41 @@ describe('the Discord notifier', () => {
     expect(api.requests[0]?.body.allowed_mentions).toEqual({ parse: [] })
   })
 
+  it.each([
+    [
+      {
+        type: 'upstream-pr-ready',
+        compareUrl:
+          'https://github.com/o/r/compare/main...patchtogo-ai:r:ptg/upstream/r/1.0.0/ghsa-x?expand=1'
+      },
+      [
+        '<https://github.com/o/r/compare/main...patchtogo-ai:r:ptg/upstream/r/1.0.0/ghsa-x?expand=1>',
+        '`pnpm --filter agent retry GHSA-p6mc-m468-83gw:lodash.set`'
+      ]
+    ],
+    [
+      {
+        type: 'superseded',
+        version: '4.3.3',
+        command: "npm deprecate '@patchtogo.ai/lodash.set@4.3.2-ptg.1' 'Superseded'"
+      },
+      ["```sh\nnpm deprecate '@patchtogo.ai/lodash.set@4.3.2-ptg.1' 'Superseded'\n```"]
+    ]
+  ] as const)('gives the operator what to act on for %o', async (extra, expected) => {
+    const api = discord()
+    const { runId, ghsaId, packageName } = notification
+
+    await createDiscordNotifier({ webhookUrl: WEBHOOK, fetch: api.fetch }).notify({
+      runId,
+      ghsaId,
+      packageName,
+      ...extra
+    })
+
+    const content = String(api.requests[0]?.body.content)
+    for (const text of expected) expect(content).toContain(text)
+  })
+
   it('fails when Discord refuses the message, so the pipeline records the step as failed', async () => {
     const api = discord(429)
 

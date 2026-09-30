@@ -123,6 +123,12 @@ export interface Superseded {
   command: string
 }
 
+export interface PatchedRelease {
+  runId: string
+  version: string
+  commit: string
+}
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
@@ -135,6 +141,7 @@ export interface RunDetails {
   stable?: StableRelease
   upstream?: UpstreamProposal
   superseded?: Superseded
+  basedOn?: PatchedRelease
 }
 
 export interface RunFailure {

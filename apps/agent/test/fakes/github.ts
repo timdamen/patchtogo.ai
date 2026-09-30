@@ -10,8 +10,11 @@ import type {
   NewBranch,
   NewCommit,
   NewPullRequest,
+  NewRepositoryAdvisory,
   PullRequest,
   RepoRef,
+  RepositoryAdvisory,
+  RepositoryAdvisoryUpdate,
   Review,
   ReviewComment,
   ReviewRule,
@@ -66,6 +69,10 @@ export interface NewReview {
   comments?: { path: string; line?: number; body: string }[]
 }
 
+export interface FakeRepositoryAdvisory extends NewRepositoryAdvisory, RepositoryAdvisory {
+  repo: string
+}
+
 export const BOT_LOGIN = 'patchtogo-bot[bot]'
 
 export interface FakeRuleset {
@@ -84,12 +91,18 @@ function key({ owner, repo }: RepoRef): string {
   return `${owner}/${repo}`.toLowerCase()
 }
 
+function publicAdvisory(advisory: FakeRepositoryAdvisory): RepositoryAdvisory {
+  const { ghsaId, url, state, description, vulnerabilities } = advisory
+  return structuredClone({ ghsaId, url, state, description, vulnerabilities })
+}
+
 export class InMemoryGitHub implements GitHub {
   readonly advisories = new Map<string, SecurityAdvisory>()
   readonly repositories = new Map<string, FakeRepository>()
   readonly commits = new Map<string, FakeCommit>()
   readonly pullRequests: FakePullRequest[] = []
   readonly comments: FakeComment[] = []
+  readonly repositoryAdvisories: FakeRepositoryAdvisory[] = []
   rulesets: FakeRuleset[] = [baseBranchRuleset]
   readonly calls: { method: Method; repo: string }[] = []
   readonly #teamMembers = new Set<string>()
@@ -465,6 +478,44 @@ export class InMemoryGitHub implements GitHub {
     if (!found) throw new Error(`no pull request ${pullRequest}`)
     if (!repository.teams.has(team)) throw new Error(`${team} cannot access ${key(repo)}`)
     if (!found.reviewTeams.includes(team)) found.reviewTeams.push(team)
+  }
+
+  async listRepositoryAdvisories(repo: RepoRef): Promise<RepositoryAdvisory[]> {
+    this.#existing(repo, 'listRepositoryAdvisories')
+    return this.repositoryAdvisories
+      .filter((advisory) => advisory.repo === key(repo))
+      .map(publicAdvisory)
+  }
+
+  async createRepositoryAdvisory(
+    repo: RepoRef,
+    advisory: NewRepositoryAdvisory
+  ): Promise<RepositoryAdvisory> {
+    const repository = this.#existing(repo, 'createRepositoryAdvisory')
+    const ghsaId = `GHSA-ptg0-fork-${String(this.repositoryAdvisories.length + 1).padStart(4, '0')}`
+    const created: FakeRepositoryAdvisory = {
+      ...structuredClone(advisory),
+      repo: key(repo),
+      ghsaId,
+      url: `https://github.com/${repository.ref.owner}/${repository.ref.repo}/security/advisories/${ghsaId}`,
+      state: 'draft'
+    }
+    this.repositoryAdvisories.push(created)
+    return publicAdvisory(created)
+  }
+
+  async updateRepositoryAdvisory(
+    repo: RepoRef,
+    ghsaId: string,
+    update: RepositoryAdvisoryUpdate
+  ): Promise<void> {
+    this.#existing(repo, 'updateRepositoryAdvisory')
+    const advisory = this.repositoryAdvisories.find(
+      (existing) => existing.repo === key(repo) && existing.ghsaId === ghsaId
+    )
+    if (!advisory) throw new Error(`no repository advisory ${ghsaId} in ${key(repo)}`)
+    if (update.vulnerabilities) advisory.vulnerabilities = structuredClone(update.vulnerabilities)
+    if (update.state) advisory.state = update.state
   }
 
   async branchReviewRules(repo: RepoRef, branch: string): Promise<ReviewRule[]> {

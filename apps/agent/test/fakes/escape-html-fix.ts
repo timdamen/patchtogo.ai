@@ -39,20 +39,26 @@ export const fixedIndex = "module.exports = (s) => String(s).replaceAll('<', '&l
 export const regressionTest =
   "const escape = require('../index.js')\nif (escape('<') !== '&lt;') process.exit(1)\n"
 
-export function fixDiff(index: string, test: string): string {
+export const upstreamIndex = 'module.exports = (s) => s\n'
+
+export function fixDiff(
+  index: string,
+  test: string,
+  { from = upstreamIndex, testPath = 'test/ghsa.js' } = {}
+): string {
   return [
     'diff --git a/index.js b/index.js',
     'index 1111111..2222222 100644',
     '--- a/index.js',
     '+++ b/index.js',
     '@@ -1 +1 @@',
-    '-module.exports = (s) => s',
+    `-${from.trimEnd()}`,
     `+${index.trimEnd()}`,
-    'diff --git a/test/ghsa.js b/test/ghsa.js',
+    `diff --git a/${testPath} b/${testPath}`,
     'new file mode 100644',
     'index 0000000..3333333',
     '--- /dev/null',
-    '+++ b/test/ghsa.js',
+    `+++ b/${testPath}`,
     `@@ -0,0 +1,${test.trimEnd().split('\n').length} @@`,
     ...test
       .trimEnd()

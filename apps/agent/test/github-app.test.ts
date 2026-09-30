@@ -513,4 +513,76 @@ describe('GitHub App adapter', () => {
     const lookups = calls.filter((c) => c.path.includes('/rulesets/'))
     expect(lookups.map((c) => c.query.get('includes_parents'))).toEqual(['true', 'true'])
   })
+
+  it('creates repository advisories for the npm package, publishes them and reads them back', async () => {
+    const path = '/repos/patchtogo-ai/escape-html/security-advisories'
+    const advisory = {
+      ghsa_id: 'GHSA-aaaa-bbbb-cccc',
+      html_url:
+        'https://github.com/patchtogo-ai/escape-html/security/advisories/GHSA-aaaa-bbbb-cccc',
+      state: 'draft',
+      description: 'Upstream advisory: https://github.com/advisories/GHSA-7q2m-5x9v-c4hw',
+      vulnerabilities: [
+        {
+          package: { ecosystem: 'npm', name: '@patchtogo.ai/escape-html' },
+          vulnerable_version_range: '>= 1.0.3-ptg.1',
+          patched_versions: '',
+          vulnerable_functions: []
+        }
+      ]
+    }
+    const { github, calls } = fakeGitHub(
+      on('POST', path, 201, advisory),
+      on('PATCH', `${path}/GHSA-aaaa-bbbb-cccc`, 200, { ...advisory, state: 'published' }),
+      on('GET', path, 200, [advisory])
+    )
+    const vulnerabilities = [
+      { packageName: '@patchtogo.ai/escape-html', range: '>= 1.0.3-ptg.1', patched: null }
+    ]
+
+    const created = await github.createRepositoryAdvisory(into, {
+      summary: 'GHSA-7q2m-5x9v-c4hw in escape-html also affects @patchtogo.ai/escape-html',
+      description: advisory.description,
+      severity: 'high',
+      vulnerabilities
+    })
+    await github.updateRepositoryAdvisory(into, created.ghsaId, {
+      vulnerabilities: [{ ...vulnerabilities[0]!, patched: '1.0.3-ptg.2' }],
+      state: 'published'
+    })
+
+    const expected = {
+      ghsaId: 'GHSA-aaaa-bbbb-cccc',
+      url: advisory.html_url,
+      state: 'draft',
+      description: advisory.description,
+      vulnerabilities
+    }
+    expect(created).toEqual(expected)
+    expect(await github.listRepositoryAdvisories(into)).toEqual([expected])
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => c.body)).toEqual([
+      {
+        summary: 'GHSA-7q2m-5x9v-c4hw in escape-html also affects @patchtogo.ai/escape-html',
+        description: advisory.description,
+        severity: 'high',
+        vulnerabilities: [
+          {
+            package: { ecosystem: 'npm', name: '@patchtogo.ai/escape-html' },
+            vulnerable_version_range: '>= 1.0.3-ptg.1',
+            patched_versions: null
+          }
+        ]
+      },
+      {
+        vulnerabilities: [
+          {
+            package: { ecosystem: 'npm', name: '@patchtogo.ai/escape-html' },
+            vulnerable_version_range: '>= 1.0.3-ptg.1',
+            patched_versions: '1.0.3-ptg.2'
+          }
+        ],
+        state: 'published'
+      }
+    ])
+  })
 })

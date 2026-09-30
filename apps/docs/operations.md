@@ -79,3 +79,12 @@ The upstream branch carries the upstream repository's own workflow files, so pus
 ### Forks from before stable releases
 
 The base branches of `patchtogo-ai/escape-html` and `patchtogo-ai/clsx` predate both workflows. Their next run adds the workflows: in one commit while the ruleset doesn't exist yet, and as a scaffolding pull request for the reviewers once it does.
+
+## Security advisories
+
+patchtogo publishes repository security advisories on its forks for later upstream advisories (see [How it works](/how-it-works#security-coverage)).
+
+- **GitHub App permission.** The App needs the repository permission **Repository security advisories: Read and write** (`repository_advisories: write`) on the `patchtogo-ai` installation. It lists a fork's advisories, creates one as a draft and publishes it by setting its state to `published`, and later updates its affected and patched versions. The installation has it; an App set up from scratch needs it added under the App's permissions, and the organisation owner has to accept the new permission.
+- **Notifications.** The reviewer channel gets "Advisory published" when a patched package is affected, and "Advisory patched" when the follow-up release fixes it. The follow-up run itself notifies like any other run (patch PR ready, needs a human).
+- **Failures.** If publishing fails, the queue job for that advisory fails after its retries, while the follow-up run carries on. `pnpm --filter agent retry` lists it among the failed advisories and `pnpm --filter agent retry <GHSA-id>` delivers it again. If the update at release time fails, the run fails at `approved`; `pnpm --filter agent retry <run>` redoes it.
+- **Needs-human follow-ups.** Leave the advisory published without a patched version. If humans finish the follow-up's pull request and merge it, its release still marks the advisory patched when the run reaches `released`. To stop reporting a package, close or withdraw the advisory on GitHub; the agent leaves closed and withdrawn advisories alone.

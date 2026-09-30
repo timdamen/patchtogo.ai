@@ -39,6 +39,7 @@ export default defineRailway(() => {
       GITHUB_APP_PRIVATE_KEY: preserve(),
       GITHUB_TOKEN: preserve(),
       DISCORD_WEBHOOK_URL: preserve(),
+      PTG_UPSTREAM_TOKEN: preserve(),
       VERCEL_TOKEN: preserve(),
       VERCEL_TEAM_ID: preserve(),
       VERCEL_PROJECT_ID: preserve(),

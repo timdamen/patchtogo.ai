@@ -4,6 +4,7 @@ import type { SecurityAdvisory } from '../../src/advisory.ts'
 import type { Author } from '../../src/pipeline/events.ts'
 import type {
   BranchMove,
+  BranchOf,
   GitHub,
   MarkedComment,
   NewBranch,
@@ -14,7 +15,8 @@ import type {
   Review,
   ReviewComment,
   ReviewRule,
-  ReviewState
+  ReviewState,
+  UpstreamAccount
 } from '../../src/pipeline/ports.ts'
 
 export interface FakeCommit {
@@ -45,6 +47,8 @@ export interface NewRepository {
 export interface FakePullRequest extends NewPullRequest, PullRequest {
   repo: string
   reviewTeams: string[]
+  baseSha: string
+  mergedHead: string | null
 }
 
 export interface FakeComment {
@@ -181,6 +185,7 @@ export class InMemoryGitHub implements GitHub {
     if (!repository || !pr || !head) throw new Error(`no pull request ${number} to merge`)
     const sha = this.#commit(head.sha, `Merge pull request #${number}`, head.files)
     repository.branches.set(pr.base, sha)
+    pr.mergedHead = head.sha
     return sha
   }
 
@@ -236,6 +241,10 @@ export class InMemoryGitHub implements GitHub {
   async getRepository(repo: RepoRef): Promise<RepoRef | undefined> {
     const repository = this.#track('getRepository', repo)
     return repository && { ...repository.ref }
+  }
+
+  async defaultBranch(repo: RepoRef): Promise<string | undefined> {
+    return this.#track('defaultBranch', repo)?.defaultBranch
   }
 
   async findCommit(repo: RepoRef, ref: string): Promise<string | undefined> {
@@ -335,6 +344,25 @@ export class InMemoryGitHub implements GitHub {
     return found && { number: found.number, url: found.url }
   }
 
+  async findPullRequestFrom(repo: RepoRef, head: BranchOf): Promise<PullRequest | undefined> {
+    this.#existing(repo, 'findPullRequestFrom')
+    const found = this.pullRequests.find(
+      (pr) => pr.repo === key(repo) && pr.head === `${head.owner}:${head.branch}`
+    )
+    return found && { number: found.number, url: found.url }
+  }
+
+  async pullRequestFiles(repo: RepoRef, pullRequest: number): Promise<string[]> {
+    const repository = this.#existing(repo, 'pullRequestFiles')
+    const pr = this.pullRequests.find((p) => p.repo === key(repo) && p.number === pullRequest)
+    if (!pr) throw new Error(`no pull request ${pullRequest}`)
+    const before = this.commits.get(pr.baseSha)?.files ?? {}
+    const after = this.commits.get(pr.mergedHead ?? repository.branches.get(pr.head) ?? '')?.files
+    return [...new Set([...Object.keys(before), ...Object.keys(after ?? {})])].filter(
+      (path) => before[path] !== after?.[path]
+    )
+  }
+
   async openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest> {
     const repository = this.#existing(repo, 'openPullRequest')
     for (const branch of [pullRequest.head, pullRequest.base]) {
@@ -343,10 +371,39 @@ export class InMemoryGitHub implements GitHub {
     if (this.pullRequests.some((pr) => pr.repo === key(repo) && pr.head === pullRequest.head)) {
       throw new Error(`a pull request for ${pullRequest.head} already exists`)
     }
-    const number = this.pullRequests.length + 1
+    return this.#addPullRequest(repository, pullRequest)
+  }
+
+  #addPullRequest(repository: FakeRepository, pullRequest: NewPullRequest): PullRequest {
+    const number = this.pullRequests.filter((pr) => pr.repo === key(repository.ref)).length + 1
     const url = `https://github.com/${repository.ref.owner}/${repository.ref.repo}/pull/${number}`
-    this.pullRequests.push({ ...pullRequest, number, url, repo: key(repo), reviewTeams: [] })
+    this.pullRequests.push({
+      ...pullRequest,
+      number,
+      url,
+      repo: key(repository.ref),
+      reviewTeams: [],
+      baseSha: repository.branches.get(pullRequest.base) ?? '',
+      mergedHead: null
+    })
     return { number, url }
+  }
+
+  upstreamAccount(): UpstreamAccount {
+    return {
+      openPullRequest: async (repo, pullRequest) => {
+        const upstream = this.repository(repo)
+        const [owner = '', branch = ''] = pullRequest.head.split(':')
+        const fork = this.forks().find(
+          (candidate) =>
+            candidate.ref.owner === owner && candidate.parent && key(candidate.parent) === key(repo)
+        )
+        if (!upstream || !fork?.branches.has(branch) || !upstream.branches.has(pullRequest.base)) {
+          throw new Error(`cannot open ${pullRequest.head} against ${key(repo)}`)
+        }
+        return this.#addPullRequest(upstream, pullRequest)
+      }
+    }
   }
 
   async isTeamMember(org: string, team: string, login: string): Promise<boolean> {

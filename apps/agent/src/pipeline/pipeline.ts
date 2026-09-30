@@ -6,7 +6,8 @@ import type {
   PipelineEvent,
   PullRequestClosed,
   PullRequestFeedback,
-  StableReleaseCompleted
+  StableReleaseCompleted,
+  UpstreamVersionPublished
 } from './events.ts'
 import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
@@ -24,6 +25,8 @@ import {
 } from './patch-run.ts'
 import { StaleRunError, type Ports, type RepoRef } from './ports.ts'
 import { releasingSteps } from './releasing.ts'
+import { supersedingCheck, watchedRuns } from './superseding.ts'
+import { upstreamingSteps } from './upstreaming.ts'
 
 export interface Pipeline {
   handle(event: PipelineEvent): Promise<void>
@@ -44,6 +47,7 @@ const releaseStates: readonly RunState[] = ['approved', 'failed', 'needs-human']
 export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
   const { github, store, notifier, clock } = ports
   const review = reviewLoop(ports, settings)
+  const supersededBy = supersedingCheck(ports, settings)
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
@@ -69,7 +73,8 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     ...forkingSteps(ports, settings),
     ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {}),
     'in-review': review.step,
-    ...releasingSteps(ports, settings)
+    ...releasingSteps(ports, settings),
+    ...(settings.automation === 'full' ? upstreamingSteps(ports, settings) : {})
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {
@@ -183,6 +188,26 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     }
   }
 
+  async function upstreamVersionPublished({
+    packageName,
+    version
+  }: UpstreamVersionPublished): Promise<void> {
+    for (const run of await watchedRuns(store, packageName)) {
+      const next = await supersededBy(run, version)
+      if (!next?.details?.superseded) continue
+      const current = await resumeFailed(run)
+      if (!current) continue
+      if (!(await save(transition(current, next, clock.now())))) continue
+      await notifier.notify({
+        type: 'superseded',
+        runId: run.id,
+        ghsaId: run.ghsaId,
+        packageName: run.packageName,
+        ...next.details.superseded
+      })
+    }
+  }
+
   async function advisoryPublished(ghsaId: string): Promise<void> {
     const advisory = await github.getAdvisory(ghsaId)
     if (!advisory) return
@@ -234,6 +259,8 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
           return pullRequestClosed(event)
         case 'stable-release-completed':
           return stableReleaseCompleted(event)
+        case 'upstream-version-published':
+          return upstreamVersionPublished(event)
       }
     }
   }

@@ -68,7 +68,13 @@ The App needs no new permissions. It reads rules with Metadata, pull request mer
 
 - The `patchtogo.ai` npm organisation owns the scope. Publishing the placeholder and `npm trust` need an owner with 2FA.
 - Each new package needs the one-time bootstrap from [How it works](/how-it-works#the-first-release-of-a-package). The needs-human message has the commands filled in for the package.
-- `npm deprecate` can't use trusted publishing, so superseded packages are deprecated by hand.
+- `npm deprecate` can't use trusted publishing, so superseded packages are deprecated by hand. The "Superseded upstream" message in the reviewer channel has the command for the package and version.
+
+### Upstream pull requests
+
+The GitHub App can push the upstream-ready branch to the fork, but it can't open a pull request on an upstream repository. To let the agent open those itself, create a dedicated machine user, give it a classic personal access token with only the `public_repo` scope (fine-grained tokens can't write to other owners' repositories), and set it as `PTG_UPSTREAM_TOKEN` on Railway. The account needs no access to the `patchtogo-ai` forks. Without the token, open each pull request from the compare link in the reviewer channel and then run `pnpm --filter agent retry <run>`.
+
+The upstream branch carries the upstream repository's own workflow files, so pushing it runs upstream's `on: push` workflows in the fork. Set the organisation's default `GITHUB_TOKEN` permissions to read-only so they can't write to the fork.
 
 ### Forks from before stable releases
 

@@ -4,7 +4,18 @@ const SUPPRESS_EMBEDS = 1 << 2
 const MAX_REASON_LENGTH = 1500
 
 function detail(notification: Notification): string {
-  return notification.type === 'needs-human' ? notification.reason : notification.url
+  switch (notification.type) {
+    case 'needs-human':
+    case 'upstream-pr-blocked':
+      return notification.reason
+    case 'patch-pr-opened':
+    case 'upstream-pr-opened':
+      return notification.url
+    case 'upstream-pr-ready':
+      return notification.compareUrl
+    case 'superseded':
+      return notification.command
+  }
 }
 
 export const consoleNotifier: Notifier = {
@@ -28,18 +39,47 @@ function inline(text: string): string {
 function discordMessage(notification: Notification): string {
   const { ghsaId, packageName, runId } = notification
   const advisory = `<https://github.com/advisories/${encodeURIComponent(ghsaId)}>`
-  if (notification.type === 'patch-pr-opened') {
-    return [
-      `**Patch PR ready for review:** ${inline(packageName)} for ${ghsaId}`,
-      `<${encodeURI(notification.url)}>`,
-      `Run ${inline(runId)} · ${advisory}`
-    ].join('\n')
+  const run = `Run ${inline(runId)} · ${advisory}`
+  switch (notification.type) {
+    case 'patch-pr-opened':
+      return [
+        `**Patch PR ready for review:** ${inline(packageName)} for ${ghsaId}`,
+        `<${encodeURI(notification.url)}>`,
+        run
+      ].join('\n')
+    case 'upstream-pr-opened':
+      return [
+        `**Upstream PR opened:** ${inline(packageName)} for ${ghsaId}`,
+        `<${encodeURI(notification.url)}>`,
+        run
+      ].join('\n')
+    case 'upstream-pr-ready':
+      return [
+        `**Upstream PR ready to open:** ${inline(packageName)} for ${ghsaId}`,
+        `<${encodeURI(notification.compareUrl)}>`,
+        `The commit message fills in the title and description. Once it is open: ${inline(`pnpm --filter agent retry ${runId}`)}`,
+        run
+      ].join('\n')
+    case 'superseded':
+      return [
+        `**Superseded upstream:** ${inline(`${packageName}@${notification.version}`)} fixes ${ghsaId}`,
+        'Deprecate the patched release (npm trusted publishing cannot):',
+        ['```sh', notification.command, '```'].join('\n'),
+        run
+      ].join('\n')
+    case 'upstream-pr-blocked':
+      return [
+        `**Upstream PR needs a human:** ${inline(packageName)} for ${ghsaId}`,
+        run,
+        untrustedBlock(notification.reason)
+      ].join('\n')
+    case 'needs-human':
+      return [
+        `**Needs a human:** ${inline(packageName)} for ${ghsaId}`,
+        run,
+        untrustedBlock(notification.reason)
+      ].join('\n')
   }
-  return [
-    `**Needs a human:** ${inline(packageName)} for ${ghsaId}`,
-    `Run ${inline(runId)} · ${advisory}`,
-    untrustedBlock(notification.reason)
-  ].join('\n')
 }
 
 export function createDiscordNotifier(options: {

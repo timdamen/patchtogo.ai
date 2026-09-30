@@ -14,7 +14,8 @@ import type {
   PullRequest,
   RepoRef,
   ReviewRule,
-  ReviewState
+  ReviewState,
+  UpstreamAccount
 } from './pipeline/ports.ts'
 import type { SourceArchive } from './sandbox.ts'
 import { repoName } from './upstream.ts'
@@ -51,6 +52,19 @@ export async function installationOctokit(env: GitHubAppEnv, org: string): Promi
     throttle,
     log
   })
+}
+
+export function tokenOctokit(token: string): Octokit {
+  return new AppOctokit({ auth: token, throttle, log })
+}
+
+export function createUpstreamAccount(gh: Octokit): UpstreamAccount {
+  return {
+    async openPullRequest(repo, { head, base, title, body }) {
+      const { data } = await gh.rest.pulls.create({ ...repo, head, base, title, body })
+      return { number: data.number, url: data.html_url }
+    }
+  }
 }
 
 function statusOf(error: unknown): number | undefined {
@@ -207,6 +221,11 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
       return response && refOf(response.data)
     },
 
+    async defaultBranch(repo) {
+      const response = await unlessStatus([404, 451], gh.rest.repos.get({ ...repo }))
+      return response?.data.default_branch
+    },
+
     findCommit: commitSha,
 
     async readFile(repo, ref, path) {
@@ -297,6 +316,28 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     },
 
     findPullRequest: openPullRequestFrom,
+
+    async findPullRequestFrom(repo, { owner, branch }) {
+      const { data } = await gh.rest.pulls.list({
+        ...repo,
+        head: `${owner}:${branch}`,
+        state: 'all',
+        per_page: 1
+      })
+      const [found] = data
+      return found && { number: found.number, url: found.html_url }
+    },
+
+    async pullRequestFiles(repo, pullRequest) {
+      const files = await gh.paginate(gh.rest.pulls.listFiles, {
+        ...repo,
+        pull_number: pullRequest,
+        per_page: 100
+      })
+      return files.flatMap((file) =>
+        file.previous_filename ? [file.previous_filename, file.filename] : [file.filename]
+      )
+    },
 
     async openPullRequest(repo, { head, base, title, body }) {
       try {

@@ -41,7 +41,8 @@ export const pipelineEnvSchema = z.object({
     .regex(/^[a-z0-9][a-z0-9._-]*$/)
     .default('patchtogo.ai'),
   PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers'),
-  PTG_AUTOMATION: z.enum(automationLevels).default('triage-only')
+  PTG_AUTOMATION: z.enum(automationLevels).default('triage-only'),
+  PTG_UPSTREAM_TOKEN: optionalString
 })
 
 export const githubAppEnvSchema = z

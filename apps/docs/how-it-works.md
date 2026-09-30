@@ -13,6 +13,8 @@ patchtogo is being set up. This page describes the intended flow, not a running 
 5. **Preview release.** Every commit on the pull request is published as a preview build through [pkg.pr.new](https://pkg.pr.new), and the pull request description carries the install link for the first one. Previews are **unreviewed** and meant as an emergency stopgap: their version is the patched version plus `.preview-<commit>`, and their README opens with an "unreviewed preview" warning. See [Preview builds](#preview-builds).
 6. **Review.** Reviewers comment on the pull request and the agent iterates on their feedback. Only comments from the reviewer team are treated as instructions. See [the review loop](#the-review-loop).
 7. **Stable release.** After two approvals from the reviewer team a human merges, and GitHub Actions publishes `@patchtogo.ai/<package>` with npm provenance, so the tarball traces back to the merge commit. See [Stable releases](#stable-releases).
+8. **Upstream pull request.** The fix and its regression test, without any patchtogo scaffolding, are proposed to the upstream repository. See [Upstreaming and superseding](#upstreaming-and-superseding).
+9. **Superseded.** Once an upstream release fixes the advisory, the patched package is deprecated in favour of it.
 
 ## The review loop
 
@@ -96,13 +98,26 @@ npm trust github @patchtogo.ai/escape-html --repo patchtogo-ai/escape-html \
 
 and sets the package's publishing access to "Require two-factor authentication and disallow tokens" on npmjs.com. Re-running the failed jobs of the release workflow then publishes the real release, and the run moves to `released`. `pnpm --filter agent retry <run>` resumes the run too; it then waits for the next successful workflow run.
 
+## Upstreaming and superseding
+
+After the stable release the agent prepares a pull request for the upstream repository. It applies the fix diff to the upstream release commit the base branch was cut from, not to the base branch, and pushes that one commit to `ptg/upstream/<name>/<version>/<ghsa-id>` in the fork. The branch holds only the fix and the regression test, and its commit message carries the pull request title and description: the advisory, the reviewed patch pull request, the published version and the fixer's summary. Nothing is proposed, and the reviewer channel is told why, when the fix doesn't apply to the upstream release commit or when the merged patch pull request differs from the agent's fix (a human changed or added files before merging), because the agent can only vouch for its own fix.
+
+The patchtogo GitHub App can't open a pull request on a repository it isn't installed on, so opening one needs a GitHub account:
+
+- With `PTG_UPSTREAM_TOKEN` set, the agent opens the pull request from the fork's branch against the upstream default branch with that token, and the run moves to `upstreamed`.
+- Without it, the reviewer channel gets a compare link that opens a pre-filled pull request. The run stays `released` until someone opens it; `pnpm --filter agent retry <run>` then finds the pull request (open, closed or merged) and moves the run to `upstreamed`.
+
+Like the patch pull request, this only happens with `PTG_AUTOMATION=full`. A run released at a lower level waits in `released`, and a retry after raising the level carries on.
+
+Every poll interval the agent also looks up the latest npm version of each upstream package it has released (runs in `released` or `upstreamed`). A new version only supersedes a patched package when the advisory, as GitHub shows it now, names a first patched version, the new version is at least that version, and it falls outside every vulnerable range of the advisory for that package. A newer version alone is not enough: an advisory without a patched version usually lists the vulnerable range up to the latest release it knew about, so a later release looks clean only because nobody checked it yet. The run then moves to `superseded`, and the reviewer channel gets the exact `npm deprecate` command for the patched release, with a message that points users back to the upstream version. The agent never publishes to npm, and npm trusted publishing can't deprecate, so an owner of the npm scope runs that command.
+
 ## Automation level
 
 The agent service reads `PTG_AUTOMATION`:
 
 - `triage-only` (the default): runs stop after triage. Nothing is forked and no model spend goes to fixing.
 - `fork`: runs are forked and verified, then stop before the fix.
-- `full`: runs go all the way to an open patch pull request.
+- `full`: runs go all the way to an open patch pull request, and released runs on to an upstream pull request.
 
 A run held back by a lower level waits in `triaged` or `fixing`. After raising the level, `pnpm --filter agent retry <GHSA-id>` resumes it from where it stopped.
 

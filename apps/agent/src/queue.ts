@@ -31,6 +31,8 @@ function eventKey(event: PipelineEvent): string {
       return ghsaIdOf(event.runId)
     case 'stable-release-completed':
       return repoName(event.repository)
+    case 'upstream-version-published':
+      return `npm:${event.packageName}`
     default:
       return (
         ghsaIdOfPatchBranch(event.pullRequest.head) ??

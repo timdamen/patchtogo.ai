@@ -17,6 +17,7 @@ interface TestPipelineOptions {
   fixes?: (FixResult | Error)[]
   store?: Store
   automation?: Automation
+  upstreamAccount?: boolean
 }
 
 const testSettings: PipelineSettings = {
@@ -34,10 +35,12 @@ export function createTestPipeline({
   triage = unexpectedTriage,
   fixes,
   store = new InMemoryStore(),
-  automation = testSettings.automation
+  automation = testSettings.automation,
+  upstreamAccount = false
 }: TestPipelineOptions = {}) {
+  const github = new InMemoryGitHub()
   const ports = {
-    github: new InMemoryGitHub(),
+    github,
     registry: new FakeRegistry(),
     builder: new ScriptedBuilder(),
     fixer: new ScriptedFixer(fixes),
@@ -45,7 +48,8 @@ export function createTestPipeline({
     model: triageModel(triage),
     store,
     notifier: new RecordingNotifier(),
-    clock: new FakeClock()
+    clock: new FakeClock(),
+    upstreamAccount: upstreamAccount ? github.upstreamAccount() : undefined
   }
   const settings = { ...testSettings, automation }
   return {

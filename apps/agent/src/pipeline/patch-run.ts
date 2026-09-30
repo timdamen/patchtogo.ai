@@ -30,7 +30,7 @@ const nextStates: Record<RunState, readonly RunState[]> = {
   fixing: ['fixing', 'in-review', 'needs-human'],
   'in-review': ['in-review', 'approved', 'needs-human'],
   approved: ['approved', 'released', 'needs-human'],
-  released: ['upstreamed', 'superseded'],
+  released: ['released', 'upstreamed', 'superseded'],
   upstreamed: ['superseded'],
   superseded: [],
   failed: []
@@ -109,6 +109,20 @@ export interface StableRelease {
   version?: string
 }
 
+export interface UpstreamProposal {
+  branch: BaseBranch | null
+  base: string | null
+  compareUrl: string | null
+  blocked: string | null
+  notified: boolean
+  pullRequest: PullRequest | null
+}
+
+export interface Superseded {
+  version: string
+  command: string
+}
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
@@ -119,6 +133,8 @@ export interface RunDetails {
   pullRequest?: PullRequest
   review?: ReviewLoop
   stable?: StableRelease
+  upstream?: UpstreamProposal
+  superseded?: Superseded
 }
 
 export interface RunFailure {

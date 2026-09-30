@@ -97,10 +97,17 @@ export function fixResult(overrides: Partial<FixResult> = {}): FixResult {
 export async function setupPatchRun(
   store: Store,
   fixes: (FixResult | Error)[],
-  automation: Automation = 'full'
+  automation: Automation = 'full',
+  { upstreamAccount = false } = {}
 ) {
-  const test = createTestPipeline({ store, triage: () => patch, fixes, automation })
-  seedUpstream(test.github, test.registry, {
+  const test = createTestPipeline({
+    store,
+    triage: () => patch,
+    fixes,
+    automation,
+    upstreamAccount
+  })
+  const upstream = seedUpstream(test.github, test.registry, {
     name: 'escape-html',
     version: '1.0.3',
     repository: { owner: 'component', repo: 'escape-html' }
@@ -109,5 +116,5 @@ export async function setupPatchRun(
   const publish = () => test.pipeline.handle({ type: 'advisory-published', ghsaId })
   const retry = () => test.pipeline.handle({ type: 'retry-requested', runId })
   const run = () => test.store.getRun(runId)
-  return { ...test, publish, retry, run }
+  return { ...test, upstream, publish, retry, run }
 }

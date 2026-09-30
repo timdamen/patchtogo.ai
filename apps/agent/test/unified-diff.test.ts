@@ -125,7 +125,8 @@ describe('applying a fixer diff', () => {
   const refusals: [string, Files, Files, RegExp][] = [
     ['a workflow', {}, { '.github/workflows/x.yml': 'on: push\n' }, /\.github\/workflows\/x\.yml/],
     ['the scaffolding notice', { 'PATCHTOGO.md': 'n\n' }, { 'PATCHTOGO.md': 'm\n' }, /scaffold/],
-    ['a binary file', {}, { 'blob.bin': '\0\x01\x02' }, /binary/]
+    ['a binary file', {}, { 'blob.bin': '\0\x01\x02' }, /binary/],
+    ['an empty sandbox placeholder', {}, { '.env': '', 'index.js': 'x\n' }, /empty \.env/]
   ]
 
   it.each(refusals)('refuses a diff that touches %s', async (_what, before, after, message) => {

@@ -101,6 +101,26 @@ describe('deterministic re-run', () => {
     expect(diff).toContain('+++ b/test/regression.js')
   })
 
+  it("keeps the empty files Claude Code's sandbox leaves in the package out of the diff", async () => {
+    await writeFile(path.join(workdir, 'yarn.lock'), '')
+    const base = await workspace.init()
+    await writeFile(path.join(workdir, 'index.js'), fixed)
+    await mkdir(path.join(workdir, 'test', 'fixtures'), { recursive: true })
+    await writeFile(path.join(workdir, 'test', 'fixtures', 'empty.json'), '')
+    await mkdir(path.join(workdir, '.claude'))
+    for (const placeholder of ['.npmrc', '.env.local', 'pnpm-lock.yaml', '.claude/agents']) {
+      await writeFile(path.join(workdir, placeholder), '')
+    }
+
+    const { commit } = await workspace.snapshotSession()
+    const diff = await workspace.diff(base, commit)
+
+    expect(diff.match(/^diff --git a\/\S+/gm)).toEqual([
+      'diff --git a/index.js',
+      'diff --git a/test/fixtures/empty.json'
+    ])
+  })
+
   it('applies a prior diff so a resumed session starts from its last patch', async () => {
     const { base, patched } = await session(fixed)
     const diff = await workspace.diff(base, patched)

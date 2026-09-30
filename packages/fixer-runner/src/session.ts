@@ -70,7 +70,7 @@ export function sessionOptions(
     allowedTools: leadTools,
     disallowedTools: blockedTools,
     agents: subagents(input.models),
-    permissionMode: 'dontAsk',
+    permissionMode: 'default',
     sandbox: {
       enabled: true,
       failIfUnavailable: true,

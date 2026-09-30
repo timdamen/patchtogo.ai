@@ -1,4 +1,5 @@
 import { posix } from 'node:path'
+import { isSandboxPlaceholder } from '@patchtogo/fixer-runner/protocol'
 import type { FileChange, FileMode } from './pipeline/ports.ts'
 
 export class DiffError extends Error {
@@ -305,6 +306,11 @@ export async function diffChanges(
       continue
     }
     const content = applyHunks(original, patch.hunks, newPath)
+    if (oldPath === null && content === '' && isSandboxPlaceholder(newPath)) {
+      throw new DiffError(
+        `the diff adds an empty ${newPath}, a placeholder that Claude Code's sandbox leaves behind`
+      )
+    }
     add(patch.mode ? { path: newPath, content, mode: patch.mode } : { path: newPath, content })
     if (oldPath !== null && oldPath !== newPath && !patch.keepOld) {
       add({ path: oldPath, delete: true })

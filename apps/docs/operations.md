@@ -2,6 +2,51 @@
 
 Notes for whoever runs the patchtogo service and the [patchtogo-ai](https://github.com/patchtogo-ai) organisation.
 
+## Operator commands in production
+
+The operator CLIs run inside the Railway service, with its variables and database, through `railway ssh` from the repository root:
+
+```sh
+railway ssh -s agent -- node apps/agent/src/retry-cli.ts
+railway ssh -s agent -- node apps/agent/src/retry-cli.ts <GHSA-id>
+railway ssh -s agent -- node apps/agent/src/retry-cli.ts <GHSA-id>:<npm-package>
+railway ssh -s agent -- node apps/agent/src/test-advisory-cli.ts apps/agent/test-advisories/<file>.json
+```
+
+The first lists failed runs, held runs with the reason they are held, and advisories whose queue job failed. With an ID it retries failed runs from their failed step and resumes held ones. The last one injects a test advisory (see [Test advisories](#test-advisories)); the file has to be in the deployed commit. In place of a path, `-` reads the advisory from standard input. Locally the same commands are `pnpm --filter agent retry …` and `pnpm --filter agent test-advisory …`, with paths relative to `apps/agent`.
+
+## Staged rollout
+
+Two Railway variables, both in `.railway/railway.ts`, decide how far the agent goes:
+
+- `PTG_AUTOMATION` (`triage-only`, `fork` or `full`) sets the level.
+- `PTG_AUTOMATION_PACKAGES` (comma-separated npm names) limits that level to the listed packages. Every other package stays at `triage-only`: its advisories are triaged, and a run that would fork, fix, open or update a pull request, follow a release, publish a repository advisory or open an upstream pull request is held instead. Empty means every package.
+
+[How it works](/how-it-works#automation-level) lists which step needs which level. Roll out in this order:
+
+1. `PTG_AUTOMATION=full` with a short list, today `escape-html`, the sacrificial fixture of the end-to-end dry run.
+2. Add packages a few at a time, and watch cost, needs-human rate and reviewer load.
+3. Empty the list only when the reviewer team can take every advisory.
+
+Changing either variable redeploys the service. Held runs don't resume on their own: after listing a package, run `retry <GHSA-id>` for its advisories (the list without an argument shows them). Taking a package off the list doesn't stop a step already running, but every later step of its runs is held, including following a merge through to `released`.
+
+## Test advisories
+
+A test advisory is a made-up advisory that drives the real pipeline on a listed package, for an end-to-end test in production. It uses the reserved prefix `GHSA-ptg0-` (`GHSA-ptg0-xxxx-xxxx`, lowercase letters and digits). Real advisory IDs never contain a `0`, so a test ID can't collide with one.
+
+- **Injecting.** Write the advisory in the shape of GitHub's global advisory API (`ghsa_id`, `type`, `cve_id`, `summary`, `description`, `severity`, `vulnerabilities[].package`, `vulnerable_version_range`, `first_patched_version`), like `apps/agent/test-advisories/escape-html-backtick.json`, and run `test-advisory-cli.ts` with it. The CLI refuses any other ID and any package that isn't in `PTG_AUTOMATION_PACKAGES`; an empty list accepts none. It stores the advisory in Postgres (`test_advisories`) and queues an `advisory-published` event. Injecting the same ID again replaces the stored advisory, like an update on GitHub.
+- **Where it comes from.** The agent resolves a `GHSA-ptg0-` ID from the database only and never asks GitHub for it, so an unknown test ID creates no run. Nothing on GitHub delivers one; only the CLI does.
+- **How it is marked.** The patch pull request title starts with `[patchtogo test]`, its description opens with a warning that the advisory is made up, and its advisory row doesn't link to the GitHub Advisory Database. Every reviewer-channel message about the run starts with `[patchtogo test]`, and so does the commit message on the patch and upstream branches.
+- **Repository advisories.** When a test advisory affects a released patched package, the agent doesn't create or publish a repository advisory. It records the advisory it would have published, with its affected and patched versions, on the run (`repositoryAdvisory` with status `dry-run`), and updates that record at the follow-up release.
+- **Upstream.** The agent pushes the upstream-ready branch to the fork, but never opens an upstream pull request for a test advisory, even with `PTG_UPSTREAM_TOKEN`. The run stays in `released` with the reason, and the reviewer channel gets "Upstream PR needs a human". Don't open one by hand either.
+- **The stable release is real.** Merging the test pull request runs the stable release workflow, which publishes a real `@patchtogo.ai/<package>` version to npm, with provenance. That is intended: the dry run has to prove the release path, and a package's first release needs the one-time npm bootstrap anyway. The run's `released` reason carries the command to deprecate the version once the test is over (`npm deprecate '@patchtogo.ai/<package>@<version>' 'patchtogo test release, not a security fix'`). It stays a published release, so a later real advisory on the package covers it like any other.
+
+For the dry run on `patchtogo-ai/escape-html`:
+
+```sh
+railway ssh -s agent -- node apps/agent/src/test-advisory-cli.ts apps/agent/test-advisories/escape-html-backtick.json
+```
+
 ## Preview builds
 
 Preview builds need, once per organisation:

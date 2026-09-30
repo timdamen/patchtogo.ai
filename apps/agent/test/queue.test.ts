@@ -88,7 +88,21 @@ describe('the pipeline queue', { timeout: 30_000 }, () => {
 
     const events: PipelineEvent[] = [1, 2, 3, 4].flatMap((n): PipelineEvent[] => [
       published('GHSA-p6mc-m468-83gw'),
-      { type: 'retry-requested', runId: `GHSA-p6mc-m468-83gw:package-${n}` }
+      { type: 'retry-requested', runId: `GHSA-p6mc-m468-83gw:package-${n}` },
+      {
+        type: 'pull-request-commented',
+        pullRequest: {
+          repository: { owner: 'patchtogo-ai', repo: `package-${n}` },
+          number: 1,
+          head: `ptg/patch/package-${n}/1.0.0/ghsa-p6mc-m468-83gw`
+        },
+        comment: {
+          id: n,
+          author: { login: 'alice', bot: false },
+          body: 'Please escape > too.',
+          url: `https://github.com/patchtogo-ai/package-${n}/pull/1#issuecomment-${n}`
+        }
+      }
     ])
     for (const event of events) await queue.send(event)
 

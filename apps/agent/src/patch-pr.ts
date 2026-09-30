@@ -24,14 +24,14 @@ function clip(text: string, limit: number): string {
   return `[${text.length - limit} characters cut]\n${text.slice(-limit)}`
 }
 
-function fenced(text: string, limit = TEXT_LIMIT): string {
+export function fenced(text: string, limit = TEXT_LIMIT): string {
   const body = clip(text.trim() || '(empty)', limit)
   const longest = Math.max(0, ...(body.match(/`+/g) ?? []).map((run) => run.length))
   const fence = '`'.repeat(Math.max(3, longest + 1))
   return `${fence}text\n${body}\n${fence}`
 }
 
-function code(text: string): string {
+export function code(text: string): string {
   return `\`${text.replaceAll('`', "'").replaceAll(/[\r\n]+/g, ' ')}\``
 }
 
@@ -44,6 +44,16 @@ function outcome(result: TestResult, expected: 'fail' | 'pass'): string {
   const verdict = failed ? 'fails' : 'passes'
   const as = (expected === 'fail') === failed ? 'as required' : 'NOT as required'
   return `${verdict}, ${as}`
+}
+
+export function testResultTable(fix: FixOutcome): string[] {
+  return [
+    '| Check | Result |',
+    '| --- | --- |',
+    `| Regression test on the base branch | ${outcome(fix.regressionBefore, 'fail')} |`,
+    `| Regression test with the fix | ${outcome(fix.regressionAfter, 'pass')} |`,
+    `| Upstream test suite with the fix | ${fix.upstreamTests.passed ? 'passes' : '**fails**'} |`
+  ]
 }
 
 export function patchPrTitle(run: PatchRun, release: UpstreamRelease): string {
@@ -132,11 +142,7 @@ export function patchPrBody({
     '',
     'Re-run by the fixer runner after the session ended, not reported by the model.',
     '',
-    '| Check | Result |',
-    '| --- | --- |',
-    `| Regression test on the base branch | ${outcome(fix.regressionBefore, 'fail')} |`,
-    `| Regression test with the fix | ${outcome(fix.regressionAfter, 'pass')} |`,
-    `| Upstream test suite with the fix | ${fix.upstreamTests.passed ? 'passes' : '**fails**'} |`,
+    ...testResultTable(fix),
     '',
     details('Regression test before the fix', fenced(fix.regressionBefore.output, OUTPUT_LIMIT)),
     '',

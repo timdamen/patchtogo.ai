@@ -302,4 +302,154 @@ describe('GitHub App adapter', () => {
     expect(lookup?.query.get('head')).toBe('patchtogo-ai:ptg/patch/x')
     expect(lookup?.query.get('state')).toBe('open')
   })
+
+  describe('the review loop', () => {
+    const repo = '/repos/patchtogo-ai/escape-html'
+    const branch = 'ptg/patch/escape-html/1.0.3/ghsa-x'
+    const refPath = `${repo}/git/ref/heads/${branch}`
+
+    it.each([
+      ['an active member', 200, { state: 'active' }, true],
+      ['an invited member who has not accepted', 200, { state: 'pending' }, false],
+      ['someone outside the team', 404, { message: 'Not Found' }, false]
+    ])('counts %s as a reviewer: %s', async (_case, status, body, reviewer) => {
+      const { github } = fakeGitHub(
+        on('GET', '/orgs/patchtogo-ai/teams/reviewers/memberships/alice', status, body)
+      )
+
+      expect(await github.isTeamMember('patchtogo-ai', 'reviewers', 'alice')).toBe(reviewer)
+    })
+
+    it('reads a review with its inline comments and marks non-users as bots', async () => {
+      const { github } = fakeGitHub(
+        on('GET', `${repo}/pulls/1/reviews/21`, 200, {
+          id: 21,
+          user: { login: 'alice', type: 'User' },
+          state: 'CHANGES_REQUESTED',
+          body: 'Two things.',
+          html_url: 'https://github.com/r#pullrequestreview-21'
+        }),
+        on('GET', `${repo}/pulls/1/reviews/21/comments`, 200, [
+          { id: 31, path: 'index.js', line: 3, body: 'Here.', html_url: 'u31' },
+          {
+            id: 32,
+            path: 'old.js',
+            line: null,
+            original_line: 7,
+            body: 'Outdated.',
+            html_url: 'u32'
+          }
+        ]),
+        on('GET', `${repo}/pulls/1/reviews/22`, 200, {
+          id: 22,
+          user: { login: 'renovate[bot]', type: 'Bot' },
+          state: 'APPROVED',
+          body: null,
+          html_url: 'u22'
+        }),
+        on('GET', `${repo}/pulls/1/reviews/22/comments`, 200, [])
+      )
+
+      expect(await github.getReview(into, 1, 21)).toEqual({
+        id: 21,
+        author: { login: 'alice', bot: false },
+        state: 'changes_requested',
+        body: 'Two things.',
+        url: 'https://github.com/r#pullrequestreview-21',
+        comments: [
+          { id: 31, path: 'index.js', line: 3, body: 'Here.', url: 'u31' },
+          { id: 32, path: 'old.js', line: 7, body: 'Outdated.', url: 'u32' }
+        ]
+      })
+      expect(await github.getReview(into, 1, 22)).toMatchObject({
+        author: { login: 'renovate[bot]', bot: true },
+        state: 'approved',
+        body: ''
+      })
+      expect(await github.getReview(into, 1, 23)).toBeUndefined()
+    })
+
+    it('commits the changes on the tree of one commit with another commit as parent', async () => {
+      const { github, calls } = fakeGitHub(
+        on('GET', `${repo}/git/commits/${sha('b')}`, 200, { tree: { sha: sha('t') } }),
+        on('POST', `${repo}/git/trees`, 201, { sha: sha('u') }),
+        on('POST', `${repo}/git/commits`, 201, { sha: sha('c') })
+      )
+
+      const commit = await github.createCommit(into, {
+        parent: sha('p'),
+        treeFrom: sha('b'),
+        message: 'fix: iteration',
+        changes: [{ path: 'index.js', content: 'fixed\n' }]
+      })
+
+      expect(commit).toBe(sha('c'))
+      expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
+        {
+          base_tree: sha('t'),
+          tree: [{ path: 'index.js', mode: '100644', type: 'blob', content: 'fixed\n' }]
+        },
+        { message: 'fix: iteration', tree: sha('u'), parents: [sha('p')] }
+      ])
+      expect(calls.some((c) => c.path.includes('/git/refs'))).toBe(false)
+    })
+
+    it('moves a branch only forward from the commit it expects', async () => {
+      let head = sha('a')
+      const { github, calls } = fakeGitHub(
+        (call) =>
+          call.method === 'GET' && call.path === refPath
+            ? { status: 200, body: { object: { sha: head } } }
+            : undefined,
+        (call) => {
+          if (call.method !== 'PATCH' || call.path !== `${repo}/git/refs/heads/${branch}`) {
+            return undefined
+          }
+          head = (call.body as { sha: string }).sha
+          return { status: 200, body: { object: { sha: head } } }
+        }
+      )
+
+      expect(await github.moveBranch(into, branch, { from: sha('a'), to: sha('c') })).toBe(true)
+      expect(await github.moveBranch(into, branch, { from: sha('a'), to: sha('c') })).toBe(true)
+      expect(await github.moveBranch(into, branch, { from: sha('a'), to: sha('d') })).toBe(false)
+
+      expect(head).toBe(sha('c'))
+      expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([
+        { sha: sha('c'), force: false }
+      ])
+    })
+
+    it('reports a branch that someone moved during the update as not moved', async () => {
+      const { github } = fakeGitHub(
+        on('GET', refPath, 200, { object: { sha: sha('a') } }),
+        on('PATCH', `${repo}/git/refs/heads/${branch}`, 422, {
+          message: 'Update is not a fast forward'
+        })
+      )
+
+      expect(await github.moveBranch(into, branch, { from: sha('a'), to: sha('c') })).toBe(false)
+    })
+
+    it.each([
+      ['posts a reply that no bot comment carries the marker of yet', 'User', 1],
+      ['skips a reply its bot already posted', 'Bot', 0]
+    ])('%s', async (_case, type, posts) => {
+      const { github, calls } = fakeGitHub(
+        on('GET', `${repo}/issues/1/comments`, 200, [
+          { id: 1, user: { login: 'someone', type }, body: '<!-- patchtogo:iteration:1 -->\nold' }
+        ]),
+        on('POST', `${repo}/issues/1/comments`, 201, { id: 2 })
+      )
+
+      await github.commentOnPullRequest(into, 1, {
+        marker: 'patchtogo:iteration:1',
+        body: '<!-- patchtogo:iteration:1 -->\nnew'
+      })
+
+      expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual(
+        posts ? [{ body: '<!-- patchtogo:iteration:1 -->\nnew' }] : []
+      )
+    })
+  })
 })

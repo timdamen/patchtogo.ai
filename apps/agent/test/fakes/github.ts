@@ -1,12 +1,19 @@
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
 import type { SecurityAdvisory } from '../../src/advisory.ts'
+import type { Author } from '../../src/pipeline/events.ts'
 import type {
+  BranchMove,
   GitHub,
+  MarkedComment,
   NewBranch,
+  NewCommit,
   NewPullRequest,
   PullRequest,
-  RepoRef
+  RepoRef,
+  Review,
+  ReviewComment,
+  ReviewState
 } from '../../src/pipeline/ports.ts'
 
 export interface FakeCommit {
@@ -39,6 +46,23 @@ export interface FakePullRequest extends NewPullRequest, PullRequest {
   reviewTeams: string[]
 }
 
+export interface FakeComment {
+  repo: string
+  pullRequest: number
+  id: number
+  author: Author
+  body: string
+}
+
+export interface NewReview {
+  author: string
+  state: ReviewState
+  body?: string
+  comments?: { path: string; line?: number; body: string }[]
+}
+
+export const BOT_LOGIN = 'patchtogo-bot[bot]'
+
 type Method = Exclude<keyof GitHub, 'getAdvisory'>
 
 function key({ owner, repo }: RepoRef): string {
@@ -50,7 +74,11 @@ export class InMemoryGitHub implements GitHub {
   readonly repositories = new Map<string, FakeRepository>()
   readonly commits = new Map<string, FakeCommit>()
   readonly pullRequests: FakePullRequest[] = []
+  readonly comments: FakeComment[] = []
   readonly calls: { method: Method; repo: string }[] = []
+  readonly #teamMembers = new Set<string>()
+  readonly #reviews = new Map<string, Review>()
+  #nextId = 100
   readonly #failures = new Map<Method, Error>()
 
   publishAdvisory(advisory: SecurityAdvisory): void {
@@ -94,6 +122,44 @@ export class InMemoryGitHub implements GitHub {
       if (before[path] !== after[path]) changed[path] = after[path] ?? null
     }
     return changed
+  }
+
+  addTeamMember(org: string, team: string, login: string): void {
+    this.#teamMembers.add(`${org}/${team}/${login}`)
+  }
+
+  submitReview(ref: RepoRef, pullRequest: number, review: NewReview): Review {
+    const base = `https://github.com/${ref.owner}/${ref.repo}/pull/${pullRequest}`
+    const id = this.#nextId++
+    const comments: ReviewComment[] = (review.comments ?? []).map((comment) => {
+      const commentId = this.#nextId++
+      return {
+        id: commentId,
+        path: comment.path,
+        line: comment.line ?? null,
+        body: comment.body,
+        url: `${base}#discussion_r${commentId}`
+      }
+    })
+    const submitted: Review = {
+      id,
+      author: { login: review.author, bot: false },
+      state: review.state,
+      body: review.body ?? '',
+      url: `${base}#pullrequestreview-${id}`,
+      comments
+    }
+    this.#reviews.set(`${key(ref)}#${pullRequest}#${id}`, submitted)
+    return structuredClone(submitted)
+  }
+
+  pushCommit(ref: RepoRef, branch: string, message: string, files: Record<string, string>): string {
+    const repository = this.repository(ref)
+    const parent = this.commits.get(repository?.branches.get(branch) ?? '')
+    if (!repository || !parent) throw new Error(`no branch ${branch} in ${key(ref)}`)
+    const sha = this.#commit(parent.sha, message, { ...parent.files, ...files })
+    repository.branches.set(branch, sha)
+    return sha
   }
 
   failNext(method: Method, error = new Error(`${method} failed`)): void {
@@ -256,6 +322,59 @@ export class InMemoryGitHub implements GitHub {
     const url = `https://github.com/${repository.ref.owner}/${repository.ref.repo}/pull/${number}`
     this.pullRequests.push({ ...pullRequest, number, url, repo: key(repo), reviewTeams: [] })
     return { number, url }
+  }
+
+  async isTeamMember(org: string, team: string, login: string): Promise<boolean> {
+    this.#track('isTeamMember', { owner: org, repo: team })
+    return this.#teamMembers.has(`${org}/${team}/${login}`)
+  }
+
+  async getReview(
+    repo: RepoRef,
+    pullRequest: number,
+    reviewId: number
+  ): Promise<Review | undefined> {
+    this.#existing(repo, 'getReview')
+    const review = this.#reviews.get(`${key(repo)}#${pullRequest}#${reviewId}`)
+    return review && structuredClone(review)
+  }
+
+  async createCommit(repo: RepoRef, commit: NewCommit): Promise<string> {
+    this.#existing(repo, 'createCommit')
+    if (!this.commits.has(commit.parent)) throw new Error(`no commit ${commit.parent}`)
+    return this.#commit(commit.parent, commit.message, this.#apply(commit.treeFrom, commit.changes))
+  }
+
+  async moveBranch(repo: RepoRef, branch: string, move: BranchMove): Promise<boolean> {
+    const repository = this.#existing(repo, 'moveBranch')
+    const head = repository.branches.get(branch)
+    if (head === move.to) return true
+    if (head !== move.from || this.commits.get(move.to)?.parent !== move.from) return false
+    repository.branches.set(branch, move.to)
+    return true
+  }
+
+  async commentOnPullRequest(
+    repo: RepoRef,
+    pullRequest: number,
+    comment: MarkedComment
+  ): Promise<void> {
+    this.#existing(repo, 'commentOnPullRequest')
+    const posted = this.comments.some(
+      (existing) =>
+        existing.repo === key(repo) &&
+        existing.pullRequest === pullRequest &&
+        existing.author.bot &&
+        existing.body.includes(`<!-- ${comment.marker} -->`)
+    )
+    if (posted) return
+    this.comments.push({
+      repo: key(repo),
+      pullRequest,
+      id: this.#nextId++,
+      author: { login: BOT_LOGIN, bot: true },
+      body: comment.body
+    })
   }
 
   async requestTeamReview(repo: RepoRef, pullRequest: number, team: string): Promise<void> {

@@ -82,6 +82,34 @@ export interface ReviewRule {
   bypass: string | null
 }
 
+export interface AffectedVersions {
+  packageName: string
+  range: string
+  patched: string | null
+}
+
+export type RepositoryAdvisoryState = 'draft' | 'published' | 'closed' | 'withdrawn' | 'triage'
+
+export interface NewRepositoryAdvisory {
+  summary: string
+  description: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  vulnerabilities: AffectedVersions[]
+}
+
+export interface RepositoryAdvisory {
+  ghsaId: string
+  url: string
+  state: RepositoryAdvisoryState
+  description: string
+  vulnerabilities: AffectedVersions[]
+}
+
+export interface RepositoryAdvisoryUpdate {
+  vulnerabilities?: AffectedVersions[]
+  state?: 'published'
+}
+
 export interface GitHub {
   getAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
   getRepository(repo: RepoRef): Promise<RepoRef | undefined>
@@ -109,6 +137,16 @@ export interface GitHub {
   moveBranch(repo: RepoRef, branch: string, move: BranchMove): Promise<boolean>
   commentOnPullRequest(repo: RepoRef, pullRequest: number, comment: MarkedComment): Promise<void>
   branchReviewRules(repo: RepoRef, branch: string): Promise<ReviewRule[]>
+  listRepositoryAdvisories(repo: RepoRef): Promise<RepositoryAdvisory[]>
+  createRepositoryAdvisory(
+    repo: RepoRef,
+    advisory: NewRepositoryAdvisory
+  ): Promise<RepositoryAdvisory>
+  updateRepositoryAdvisory(
+    repo: RepoRef,
+    ghsaId: string,
+    update: RepositoryAdvisoryUpdate
+  ): Promise<void>
 }
 
 export interface UpstreamAccount {
@@ -304,6 +342,16 @@ export interface SupersededNotification {
   command: string
 }
 
+export interface RepositoryAdvisoryNotification {
+  type: 'repository-advisory'
+  runId: string
+  ghsaId: string
+  packageName: string
+  patchedPackage: string
+  url: string
+  patchedVersion: string | null
+}
+
 export type Notification =
   | NeedsHumanNotification
   | PatchPrOpenedNotification
@@ -311,6 +359,7 @@ export type Notification =
   | UpstreamPrOpenedNotification
   | UpstreamPrBlockedNotification
   | SupersededNotification
+  | RepositoryAdvisoryNotification
 
 export interface Notifier {
   notify(notification: Notification): Promise<void>

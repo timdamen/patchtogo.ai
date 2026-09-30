@@ -1,4 +1,5 @@
 import { npmAdvisories } from '../advisory.ts'
+import { patchedPackageName } from '../naming.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
 import type { Automation } from './automation.ts'
 import { sameRepository } from '../upstream.ts'
@@ -9,13 +10,13 @@ import type {
   StableReleaseCompleted,
   UpstreamVersionPublished
 } from './events.ts'
+import { isPatchedPackage, securityCoverage } from './coverage.ts'
 import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
 import { reviewLoop } from './review.ts'
 import {
   IllegalTransitionError,
   isTerminal,
-  newPatchRun,
   retry,
   transition,
   type PatchRun,
@@ -48,10 +49,22 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
   const { github, store, notifier, clock } = ports
   const review = reviewLoop(ports, settings)
   const supersededBy = supersedingCheck(ports, settings)
+  const coverage = securityCoverage(ports, settings)
+  const releasing = releasingSteps(ports, settings)
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
-      const { triage, usage } = await triageAdvisory(ports, run.advisory)
+      const { triage, usage } = await triageAdvisory(
+        ports,
+        run.advisory,
+        run.basedOn && run.release
+          ? {
+              name: patchedPackageName(run.packageName, settings),
+              version: run.basedOn.version,
+              upstreamVersion: run.release.version
+            }
+          : undefined
+      )
       if (usage) {
         await store.recordCost({
           runId: run.id,
@@ -73,7 +86,7 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     ...forkingSteps(ports, settings),
     ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {}),
     'in-review': review.step,
-    ...releasingSteps(ports, settings),
+    approved: coverage.reportOnRelease(releasing.approved),
     ...(settings.automation === 'full' ? upstreamingSteps(ports, settings) : {})
   }
 
@@ -211,9 +224,18 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
   async function advisoryPublished(ghsaId: string): Promise<void> {
     const advisory = await github.getAdvisory(ghsaId)
     if (!advisory) return
+    const failures: unknown[] = []
     for (const packageAdvisory of npmAdvisories(advisory)) {
-      await advance(await store.createRunIfAbsent(newPatchRun(packageAdvisory, clock.now())))
+      if (isPatchedPackage(packageAdvisory.packageName, settings)) continue
+      const covered = await coverage.check(packageAdvisory)
+      try {
+        await coverage.report(covered)
+      } catch (error) {
+        failures.push(error)
+      }
+      await advance(await store.createRunIfAbsent(coverage.newRun(covered, clock.now())))
     }
+    if (failures.length > 0) throw failures[0]
   }
 
   async function retryRequested(id: string): Promise<void> {

@@ -111,6 +111,11 @@ export function patchPrBody({
     `| Package | ${code(run.packageName)}, vulnerable range ${code(advisory.vulnerableRange ?? 'unknown')} |`,
     `| Patched release | ${code(`${run.packageName}@${release.version}`)} from [${repoName(release.repository)}@${release.commit.sha.slice(0, 7)}](${upstreamCommit}) |`,
     `| Published as | ${code(patched)} |`,
+    ...(run.basedOn
+      ? [
+          `| Builds on | ${code(`${patched}@${run.basedOn.version}`)}, the latest stable release (${run.basedOn.commit.slice(0, 7)}), so its earlier fixes stay |`
+        ]
+      : []),
     '',
     'The advisory text below comes from the GitHub Advisory Database and is shown verbatim.',
     '',

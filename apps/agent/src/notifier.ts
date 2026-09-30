@@ -10,6 +10,7 @@ function detail(notification: Notification): string {
       return notification.reason
     case 'patch-pr-opened':
     case 'upstream-pr-opened':
+    case 'repository-advisory':
       return notification.url
     case 'upstream-pr-ready':
       return notification.compareUrl
@@ -72,6 +73,14 @@ function discordMessage(notification: Notification): string {
         `**Upstream PR needs a human:** ${inline(packageName)} for ${ghsaId}`,
         run,
         untrustedBlock(notification.reason)
+      ].join('\n')
+    case 'repository-advisory':
+      return [
+        notification.patchedVersion
+          ? `**Advisory patched:** ${inline(notification.patchedPackage)} ${inline(notification.patchedVersion)} fixes ${ghsaId}`
+          : `**Advisory published:** ${ghsaId} in ${inline(packageName)} also affects ${inline(notification.patchedPackage)}`,
+        `<${encodeURI(notification.url)}>`,
+        run
       ].join('\n')
     case 'needs-human':
       return [

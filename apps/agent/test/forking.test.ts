@@ -155,6 +155,9 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(files['package.json']).toMatch(/^\{\n {2}"name"[\s\S]*\}\n$/)
       expect(files['README.md']).toMatch(/^> \[!WARNING\]\n> \*\*Unofficial patched fork\.\*\*/)
       expect(files['README.md']).toContain('https://github.com/component/escape-html')
+      expect(files['README.md']).toContain(
+        'patchtogo publishes [its own security advisories](https://github.com/patchtogo-ai/escape-html/security/advisories)'
+      )
       expect(files['README.md']).toContain('# escape-html\n\nEscapes HTML.\n')
       expect(files['PATCHTOGO.md']).toContain('unofficial fork of the npm package `escape-html`')
       expect(files['PATCHTOGO.md']).toContain('The upstream licence text is in [LICENSE](LICENSE).')

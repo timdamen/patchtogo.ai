@@ -94,6 +94,27 @@ describe('the Discord notifier', () => {
         command: "npm deprecate '@patchtogo.ai/lodash.set@4.3.2-ptg.1' 'Superseded'"
       },
       ["```sh\nnpm deprecate '@patchtogo.ai/lodash.set@4.3.2-ptg.1' 'Superseded'\n```"]
+    ],
+    [
+      {
+        type: 'repository-advisory',
+        patchedPackage: '@patchtogo.ai/lodash.set',
+        url: 'https://github.com/patchtogo-ai/lodash.set/security/advisories/GHSA-aaaa-bbbb-cccc',
+        patchedVersion: null
+      },
+      [
+        '**Advisory published:** GHSA-p6mc-m468-83gw in `lodash.set` also affects `@patchtogo.ai/lodash.set`',
+        '<https://github.com/patchtogo-ai/lodash.set/security/advisories/GHSA-aaaa-bbbb-cccc>'
+      ]
+    ],
+    [
+      {
+        type: 'repository-advisory',
+        patchedPackage: '@patchtogo.ai/lodash.set',
+        url: 'https://github.com/patchtogo-ai/lodash.set/security/advisories/GHSA-aaaa-bbbb-cccc',
+        patchedVersion: '4.3.2-ptg.2'
+      },
+      ['**Advisory patched:** `@patchtogo.ai/lodash.set` `4.3.2-ptg.2` fixes GHSA-p6mc-m468-83gw']
     ]
   ] as const)('gives the operator what to act on for %o', async (extra, expected) => {
     const api = discord()

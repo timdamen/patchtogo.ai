@@ -15,6 +15,7 @@ patchtogo is being set up. This page describes the intended flow, not a running 
 7. **Stable release.** After two approvals from the reviewer team a human merges, and GitHub Actions publishes `@patchtogo.ai/<package>` with npm provenance, so the tarball traces back to the merge commit. See [Stable releases](#stable-releases).
 8. **Upstream pull request.** The fix and its regression test, without any patchtogo scaffolding, are proposed to the upstream repository. See [Upstreaming and superseding](#upstreaming-and-superseding).
 9. **Superseded.** Once an upstream release fixes the advisory, the patched package is deprecated in favour of it.
+10. **Security coverage.** When a new advisory hits the upstream package and covers the version a released patched package is built from, patchtogo publishes an advisory for the patched package too and starts a follow-up fix on top of its latest stable release. See [Security coverage](#security-coverage).
 
 ## The review loop
 
@@ -110,6 +111,21 @@ The patchtogo GitHub App can't open a pull request on a repository it isn't inst
 Like the patch pull request, this only happens with `PTG_AUTOMATION=full`. A run released at a lower level waits in `released`, and a retry after raising the level carries on.
 
 Every poll interval the agent also looks up the latest npm version of each upstream package it has released (runs in `released` or `upstreamed`). A new version only supersedes a patched package when the advisory, as GitHub shows it now, names a first patched version, the new version is at least that version, and it falls outside every vulnerable range of the advisory for that package. A newer version alone is not enough: an advisory without a patched version usually lists the vulnerable range up to the latest release it knew about, so a later release looks clean only because nobody checked it yet. The run then moves to `superseded`, and the reviewer channel gets the exact `npm deprecate` command for the patched release, with a message that points users back to the upstream version. The agent never publishes to npm, and npm trusted publishing can't deprecate, so an owner of the npm scope runs that command.
+
+## Security coverage
+
+`npm audit`, Dependabot and other scanners look advisories up by the package a dependency resolves to. Once you override `escape-html` with `@patchtogo.ai/escape-html`, an advisory filed later against `escape-html` no longer matches your lockfile, so patchtogo reports it for the patched package itself.
+
+When an advisory is published or updated for a package that patchtogo has released (the run is `released` or `upstreamed`), the agent checks each line of patched releases, `<upstream version>-ptg.N`, against the advisory's vulnerable range. If the upstream version a line is built from is in the range:
+
+- **It publishes a repository security advisory on the fork**, for example on `patchtogo-ai/escape-html`, for the npm package `@patchtogo.ai/escape-html`. It lists the affected versions (`>= 1.0.3-ptg.1`), links the upstream advisory and uses its severity. Published repository advisories go to the GitHub Advisory Database, and from there to OSV, so scanners warn you instead of staying silently green. The reviewer channel is told.
+- **It starts a follow-up patch run** for the new advisory, `<GHSA-id>:<package>` like any other run, if the latest stable release is on an affected line. The follow-up skips forking and the tarball-match check: it builds on the base branch of that release, which already holds every merged fix, instead of on the latest upstream release, so the earlier fix is kept. Its triage doesn't skip the advisory because upstream has a patched version or because upstream's latest version left the range, since neither helps someone on the patched package. From there it's an ordinary run: fix, patch pull request, review, merge, and the next `-ptg.N` release.
+- **When that release lands**, the agent updates the advisory: the affected range becomes `>= 1.0.3-ptg.1, < 1.0.3-ptg.2` and `1.0.3-ptg.2` is the patched version, and the reviewer channel is told again.
+- **If the advisory can't be patched** (the follow-up goes to needs-human), the advisory stays published without a patched version, so you're warned rather than silently green.
+
+Nothing happens for packages patchtogo never released, or when the range doesn't cover the upstream version our releases are built from. Advisories on `@patchtogo.ai/*` packages themselves, including the ones patchtogo publishes, are never patch candidates. Each patched package's README links the fork's advisories.
+
+The agent finds its own advisory on the fork again by the "Upstream advisory" link in its description, so a redelivered advisory never creates a second one, and one that was created but not yet published is published on the next delivery. It doesn't touch an advisory someone closed or withdrew.
 
 ## Automation level
 

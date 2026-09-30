@@ -19,7 +19,7 @@ import {
 import { compareTarballs, describeMismatch } from '../tarball-match.ts'
 import { githubRepository, releaseRefs, repoName } from '../upstream.ts'
 import { parseVulnerableRange } from '../vulnerable-range.ts'
-import type { PatchRun, Step, UpstreamRelease } from './patch-run.ts'
+import type { PatchRun, Step, Transition, UpstreamRelease } from './patch-run.ts'
 import type { PullRequest, Ports, PublishedVersion, RepoRef } from './ports.ts'
 import { unprotectedBranch } from './releasing.ts'
 
@@ -222,6 +222,24 @@ export function forkingSteps(
     )
   }
 
+  async function buildOnStableRelease(run: PatchRun): Promise<Transition> {
+    const { release, fork, basedOn } = run
+    if (!release || !fork || !basedOn) {
+      throw new Error(`patch run ${run.id} has no stable release to build on`)
+    }
+    const name = baseBranchName(run.packageName, release.version)
+    const stable = `${patchedPackageName(run.packageName, settings)}@${basedOn.version}`
+    if (!(await github.getBranch(fork, name))) {
+      throw new Error(
+        `${name} is gone from ${repoName(fork)}, so this follow-up to ${basedOn.runId} cannot build on ${stable}. Restore the branch at ${basedOn.commit}, then retry the run.`
+      )
+    }
+    return {
+      to: 'verifying',
+      reason: `Follow-up to ${basedOn.runId}: builds on ${stable} (${basedOn.commit}), the latest stable release, on ${name} in ${repoName(fork)} instead of on upstream.`
+    }
+  }
+
   async function isolate(fork: RepoRef, baseBranch: string) {
     await github.setDefaultBranch(fork, baseBranch)
     for (const branch of await github.listBranches(fork)) {
@@ -232,6 +250,7 @@ export function forkingSteps(
 
   return {
     async forking(run) {
+      if (run.basedOn) return buildOnStableRelease(run)
       const release = await locateRelease(run)
       if ('needsHuman' in release) return { to: 'needs-human', reason: release.needsHuman }
       const fork = await github.forkRepository(release.repository, {

@@ -8,11 +8,13 @@ import type { GitHubAppEnv } from './env.ts'
 import { parseGlobalAdvisory } from './github-advisories.ts'
 import type { Author } from './pipeline/events.ts'
 import type {
+  AffectedVersions,
   FileChange,
   GitHub,
   NewCommit,
   PullRequest,
   RepoRef,
+  RepositoryAdvisory,
   ReviewRule,
   ReviewState,
   UpstreamAccount
@@ -120,6 +122,42 @@ const reviewStates: Record<string, ReviewState> = {
   COMMENTED: 'commented',
   DISMISSED: 'dismissed',
   PENDING: 'pending'
+}
+
+interface RepositoryAdvisoryData {
+  ghsa_id: string
+  html_url: string
+  state: RepositoryAdvisory['state']
+  description: string | null
+  vulnerabilities:
+    | {
+        package: { ecosystem: string; name: string | null } | null
+        vulnerable_version_range: string | null
+        patched_versions: string | null
+      }[]
+    | null
+}
+
+function repositoryAdvisoryOf(data: RepositoryAdvisoryData): RepositoryAdvisory {
+  return {
+    ghsaId: data.ghsa_id,
+    url: data.html_url,
+    state: data.state,
+    description: data.description ?? '',
+    vulnerabilities: (data.vulnerabilities ?? []).map((vulnerability) => ({
+      packageName: vulnerability.package?.name ?? '',
+      range: vulnerability.vulnerable_version_range ?? '',
+      patched: vulnerability.patched_versions || null
+    }))
+  }
+}
+
+function npmVulnerabilities(vulnerabilities: AffectedVersions[]) {
+  return vulnerabilities.map(({ packageName, range, patched }) => ({
+    package: { ecosystem: 'npm' as const, name: packageName },
+    vulnerable_version_range: range,
+    patched_versions: patched
+  }))
 }
 
 export function authorOf(user: { login: string; type?: string } | null | undefined): Author {
@@ -455,6 +493,34 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
         lastPushApproval: review.require_last_push_approval ?? false,
         bypass: (review.rulesetId !== undefined && bypass.get(review.rulesetId)) || null
       }))
+    },
+
+    async listRepositoryAdvisories(repo) {
+      const advisories = await gh.paginate(gh.rest.securityAdvisories.listRepositoryAdvisories, {
+        ...repo,
+        per_page: 100
+      })
+      return advisories.map(repositoryAdvisoryOf)
+    },
+
+    async createRepositoryAdvisory(repo, { summary, description, severity, vulnerabilities }) {
+      const { data } = await gh.rest.securityAdvisories.createRepositoryAdvisory({
+        ...repo,
+        summary,
+        description,
+        severity,
+        vulnerabilities: npmVulnerabilities(vulnerabilities)
+      })
+      return repositoryAdvisoryOf(data)
+    },
+
+    async updateRepositoryAdvisory(repo, ghsaId, { vulnerabilities, state }) {
+      await gh.rest.securityAdvisories.updateRepositoryAdvisory({
+        ...repo,
+        ghsa_id: ghsaId,
+        ...(vulnerabilities ? { vulnerabilities: npmVulnerabilities(vulnerabilities) } : {}),
+        ...(state ? { state } : {})
+      })
     },
 
     async sourceArchive(source) {

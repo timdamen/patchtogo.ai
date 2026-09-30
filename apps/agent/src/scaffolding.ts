@@ -86,21 +86,25 @@ function rewritePackageJson(
 }
 
 function banner(input: ScaffoldingInput, patchedName: string, markdown: boolean): string {
-  const { packageName, release } = input
+  const { packageName, release, fork } = input
   const upstream = `https://github.com/${repoName(release.repository)}`
+  const advisories = `https://github.com/${repoName(fork)}/security/advisories`
   const npm = `https://www.npmjs.com/package/${packageName}`
   const licence = release.license ? `, under its original licence (${release.license})` : ''
   if (!markdown) {
     return [
       `UNOFFICIAL PATCHED FORK: ${patchedName} is ${packageName} ${release.version} with security fixes`,
       `from patchtogo (https://patchtogo.ai)${licence}. It is not maintained by or affiliated with`,
-      `the upstream authors. Upstream: ${upstream}. See ${NOTICE_FILE} for attribution.`
+      `the upstream authors. Upstream: ${upstream}. See ${NOTICE_FILE} for attribution.`,
+      `Advisories filed against ${packageName} don't reach ${patchedName} in npm audit, so patchtogo`,
+      `publishes its own security advisories for it: ${advisories}`
     ].join('\n')
   }
   return [
     '> [!WARNING]',
     `> **Unofficial patched fork.** \`${patchedName}\` is [\`${packageName}\`](${npm}) ${release.version} with security fixes from [patchtogo](https://patchtogo.ai)${licence}.`,
-    `> It is not maintained by or affiliated with the upstream authors. The original lives at ${upstream}; see [${NOTICE_FILE}](${NOTICE_FILE}) for attribution.`
+    `> It is not maintained by or affiliated with the upstream authors. The original lives at ${upstream}; see [${NOTICE_FILE}](${NOTICE_FILE}) for attribution.`,
+    `> Advisories filed against \`${packageName}\` don't reach \`${patchedName}\` in \`npm audit\`, so patchtogo publishes [its own security advisories](${advisories}) for it when a new upstream advisory covers the version it's built from.`
   ].join('\n')
 }
 

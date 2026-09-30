@@ -1,9 +1,10 @@
 import { npmAdvisories } from '../advisory.ts'
 import { triageAdvisory, type Triage } from '../triage.ts'
 import type { Automation } from './automation.ts'
-import type { PipelineEvent } from './events.ts'
+import type { PipelineEvent, PullRequestFeedback } from './events.ts'
 import { fixingSteps } from './fixing.ts'
 import { forkingSteps, type ForkSettings } from './forking.ts'
+import { reviewLoop } from './review.ts'
 import {
   IllegalTransitionError,
   isTerminal,
@@ -33,6 +34,7 @@ const triageOutcomes = {
 
 export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeline {
   const { github, store, notifier, clock } = ports
+  const review = reviewLoop(ports, settings)
 
   const steps: Partial<Record<RunState, Step>> = {
     async detected(run) {
@@ -56,7 +58,8 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
       return { to, reason: run.triage.reason }
     },
     ...forkingSteps(ports, settings),
-    ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {})
+    ...(settings.automation === 'full' ? fixingSteps(ports, settings) : {}),
+    'in-review': review.step
   }
 
   async function attempt(step: Step, run: PatchRun): Promise<Transition | undefined> {
@@ -121,6 +124,11 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
     if (await save(resumed)) await advance(resumed)
   }
 
+  async function feedbackReceived(event: PullRequestFeedback): Promise<void> {
+    const recorded = await review.record(event)
+    if (recorded?.iterate) await advance(recorded.run)
+  }
+
   return {
     async handle(event) {
       switch (event.type) {
@@ -128,6 +136,11 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
           return advisoryPublished(event.ghsaId)
         case 'retry-requested':
           return retryRequested(event.runId)
+        case 'pull-request-commented':
+        case 'review-submitted':
+        case 'review-comment-created':
+        case 'pull-request-labeled':
+          return feedbackReceived(event)
       }
     }
   }

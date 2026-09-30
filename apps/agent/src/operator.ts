@@ -21,7 +21,8 @@ function resumable(run: PatchRun): boolean {
   return (
     run.state === 'failed' ||
     (run.state === 'triaged' && run.triage?.decision === 'patch') ||
-    (run.state === 'fixing' && !run.pullRequest)
+    (run.state === 'fixing' && !run.pullRequest) ||
+    (run.state === 'in-review' && (run.review?.instructions.length ?? 0) > 0)
   )
 }
 

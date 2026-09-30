@@ -33,3 +33,9 @@ export function patchBranchName(
 ): string {
   return `${PATCH_BRANCH_PREFIX}${packageSlug(packageName)}/${upstreamVersion}/${ghsaId.toLowerCase()}`
 }
+
+export function ghsaIdOfPatchBranch(branch: string): string | undefined {
+  if (!branch.startsWith(PATCH_BRANCH_PREFIX)) return undefined
+  const match = /\/ghsa(-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})$/.exec(branch)
+  return match ? `GHSA${match[1]}` : undefined
+}

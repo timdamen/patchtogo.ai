@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BRANCH_NAMESPACE,
+  ghsaIdOfPatchBranch,
   packageSlug,
   patchBranchName,
   patchedPackageName,
@@ -42,5 +43,12 @@ describe('naming', () => {
     const name = patchBranchName('@acme/strings', '2.1.0', 'GHSA-p6mc-m468-83gw')
     expect(name).toBe('ptg/patch/acme__strings/2.1.0/ghsa-p6mc-m468-83gw')
     expect(name.startsWith(BRANCH_NAMESPACE)).toBe(true)
+  })
+
+  it('reads the advisory back from a patch branch and from nothing else', () => {
+    const name = patchBranchName('@acme/strings', '2.1.0-beta.1', 'GHSA-p6mc-m468-83gw')
+    expect(ghsaIdOfPatchBranch(name)).toBe('GHSA-p6mc-m468-83gw')
+    expect(ghsaIdOfPatchBranch('ptg/base/acme__strings/2.1.0')).toBeUndefined()
+    expect(ghsaIdOfPatchBranch('feature/ghsa-p6mc-m468-83gw')).toBeUndefined()
   })
 })

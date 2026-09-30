@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import type { PgBoss } from 'pg-boss'
 import type { PipelineEvent } from './pipeline/events.ts'
+import { ghsaIdOfPatchBranch } from './naming.ts'
 import { ghsaIdOf } from './pipeline/patch-run.ts'
+import { repoName } from './upstream.ts'
 
 const PIPELINE_QUEUE = 'pipeline'
 const HEARTBEAT_SECONDS = 60
@@ -27,6 +29,11 @@ function eventKey(event: PipelineEvent): string {
       return event.ghsaId
     case 'retry-requested':
       return ghsaIdOf(event.runId)
+    default:
+      return (
+        ghsaIdOfPatchBranch(event.pullRequest.head) ??
+        `${repoName(event.pullRequest.repository)}#${event.pullRequest.number}`
+      )
   }
 }
 

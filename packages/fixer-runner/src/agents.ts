@@ -100,8 +100,10 @@ export const leadPrompt = [
   workspaceRule
 ].join('\n\n')
 
+const promptTags = /<(\/?)\s*(advisory|triage|reviewer-instruction|untrusted-comment)\b/gi
+
 function tagged(tag: string, body: string) {
-  return `<${tag}>\n${body}\n</${tag}>`
+  return `<${tag}>\n${body.replaceAll(promptTags, '‹$1$2')}\n</${tag}>`
 }
 
 function untrustedContext(items: string[]) {

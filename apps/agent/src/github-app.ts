@@ -6,7 +6,15 @@ import { throttling } from '@octokit/plugin-throttling'
 import { Octokit } from '@octokit/rest'
 import type { GitHubAppEnv } from './env.ts'
 import { parseGlobalAdvisory } from './github-advisories.ts'
-import type { FileChange, GitHub, PullRequest, RepoRef } from './pipeline/ports.ts'
+import type { Author } from './pipeline/events.ts'
+import type {
+  FileChange,
+  GitHub,
+  NewCommit,
+  PullRequest,
+  RepoRef,
+  ReviewState
+} from './pipeline/ports.ts'
 import type { SourceArchive } from './sandbox.ts'
 import { repoName } from './upstream.ts'
 
@@ -85,7 +93,36 @@ export interface GitHubAppOptions {
   pollIntervalMs?: number
 }
 
-export type GitHubAppAdapter = GitHub & { sourceArchive: SourceArchive }
+export interface PullRequestHeads {
+  pullRequestHead(repo: RepoRef, pullRequest: number): Promise<string | undefined>
+}
+
+export type GitHubAppAdapter = GitHub & PullRequestHeads & { sourceArchive: SourceArchive }
+
+const reviewStates: Record<string, ReviewState> = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes_requested',
+  COMMENTED: 'commented',
+  DISMISSED: 'dismissed',
+  PENDING: 'pending'
+}
+
+export function authorOf(user: { login: string; type?: string } | null | undefined): Author {
+  return { login: user?.login ?? 'ghost', bot: user?.type !== 'User' }
+}
+
+function treeEntries(changes: FileChange[]) {
+  return changes.map((change) =>
+    'delete' in change
+      ? { path: change.path, mode: '100644' as const, type: 'blob' as const, sha: null }
+      : {
+          path: change.path,
+          mode: change.mode ?? ('100644' as const),
+          type: 'blob' as const,
+          content: change.content
+        }
+  )
+}
 
 export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): GitHubAppAdapter {
   const readyTimeoutMs = options.forkReadyTimeoutMs ?? 5 * 60_000
@@ -126,34 +163,23 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     return found && { number: found.number, url: found.html_url }
   }
 
-  async function commitChanges(
+  async function commit(
     repo: RepoRef,
-    parent: string,
-    message: string,
-    changes: FileChange[]
+    { parent, treeFrom, message, changes }: NewCommit
   ): Promise<string> {
-    const { data: base } = await gh.rest.git.getCommit({ ...repo, commit_sha: parent })
+    const { data: base } = await gh.rest.git.getCommit({ ...repo, commit_sha: treeFrom })
     const { data: tree } = await gh.rest.git.createTree({
       ...repo,
       base_tree: base.tree.sha,
-      tree: changes.map((change) =>
-        'delete' in change
-          ? { path: change.path, mode: '100644' as const, type: 'blob' as const, sha: null }
-          : {
-              path: change.path,
-              mode: change.mode ?? ('100644' as const),
-              type: 'blob' as const,
-              content: change.content
-            }
-      )
+      tree: treeEntries(changes)
     })
-    const { data: commit } = await gh.rest.git.createCommit({
+    const { data } = await gh.rest.git.createCommit({
       ...repo,
       message,
       tree: tree.sha,
       parents: [parent]
     })
-    return commit.sha
+    return data.sha
   }
 
   async function waitUntilReady(fork: RepoRef, branch: string): Promise<void> {
@@ -235,10 +261,10 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     getBranch: branchSha,
 
     async createBranch(repo, { name, parent, message, changes }) {
-      const commit = await commitChanges(repo, parent, message, changes)
+      const sha = await commit(repo, { parent, treeFrom: parent, message, changes })
       try {
-        await gh.rest.git.createRef({ ...repo, ref: `refs/heads/${name}`, sha: commit })
-        return commit
+        await gh.rest.git.createRef({ ...repo, ref: `refs/heads/${name}`, sha })
+        return sha
       } catch (error) {
         const existing = statusOf(error) === 422 ? await branchSha(repo, name) : undefined
         if (existing) return existing
@@ -247,9 +273,9 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     },
 
     async updateBranch(repo, { name, parent, message, changes }) {
-      const commit = await commitChanges(repo, parent, message, changes)
-      await gh.rest.git.updateRef({ ...repo, ref: `heads/${name}`, sha: commit, force: false })
-      return commit
+      const sha = await commit(repo, { parent, treeFrom: parent, message, changes })
+      await gh.rest.git.updateRef({ ...repo, ref: `heads/${name}`, sha, force: false })
+      return sha
     },
 
     async listBranches(repo) {
@@ -288,6 +314,79 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
         pull_number: pullRequest,
         team_reviewers: [team]
       })
+    },
+
+    async isTeamMember(org, team, login) {
+      const response = await unlessStatus(
+        [404],
+        gh.rest.teams.getMembershipForUserInOrg({ org, team_slug: team, username: login })
+      )
+      return response?.data.state === 'active'
+    },
+
+    async getReview(repo, pullRequest, reviewId) {
+      const response = await unlessStatus(
+        [404],
+        gh.rest.pulls.getReview({ ...repo, pull_number: pullRequest, review_id: reviewId })
+      )
+      if (!response) return undefined
+      const { data } = response
+      const comments = await gh.paginate(gh.rest.pulls.listCommentsForReview, {
+        ...repo,
+        pull_number: pullRequest,
+        review_id: reviewId,
+        per_page: 100
+      })
+      return {
+        id: data.id,
+        author: authorOf(data.user),
+        state: reviewStates[data.state] ?? 'pending',
+        body: data.body ?? '',
+        url: data.html_url,
+        comments: comments.map((comment) => ({
+          id: comment.id,
+          path: comment.path,
+          line: comment.line ?? comment.original_line ?? null,
+          body: comment.body,
+          url: comment.html_url
+        }))
+      }
+    },
+
+    createCommit: commit,
+
+    async moveBranch(repo, branch, { from, to }) {
+      const head = await branchSha(repo, branch)
+      if (head === to) return true
+      if (head !== from) return false
+      try {
+        await gh.rest.git.updateRef({ ...repo, ref: `heads/${branch}`, sha: to, force: false })
+        return true
+      } catch (error) {
+        if (statusOf(error) !== 422) throw error
+        return (await branchSha(repo, branch)) === to
+      }
+    },
+
+    async commentOnPullRequest(repo, pullRequest, { marker, body }) {
+      const existing = await gh.paginate(gh.rest.issues.listComments, {
+        ...repo,
+        issue_number: pullRequest,
+        per_page: 100
+      })
+      const tag = `<!-- ${marker} -->`
+      const posted = existing.some(
+        (comment) => comment.user?.type === 'Bot' && comment.body?.includes(tag)
+      )
+      if (!posted) await gh.rest.issues.createComment({ ...repo, issue_number: pullRequest, body })
+    },
+
+    async pullRequestHead(repo, pullRequest) {
+      const response = await unlessStatus(
+        [404],
+        gh.rest.pulls.get({ ...repo, pull_number: pullRequest })
+      )
+      return response?.data.head.ref
     },
 
     async sourceArchive(source) {

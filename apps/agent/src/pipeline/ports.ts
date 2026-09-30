@@ -1,6 +1,7 @@
 import type { LanguageModel } from 'ai'
 import type { Advisory, SecurityAdvisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
+import type { Author } from './events.ts'
 import type { PatchRun, RunFailure, RunState } from './patch-run.ts'
 
 export interface RepoRef {
@@ -33,6 +34,42 @@ export interface NewPullRequest {
   body: string
 }
 
+export interface NewCommit {
+  parent: string
+  treeFrom: string
+  message: string
+  changes: FileChange[]
+}
+
+export interface BranchMove {
+  from: string
+  to: string
+}
+
+export type ReviewState = 'approved' | 'changes_requested' | 'commented' | 'dismissed' | 'pending'
+
+export interface ReviewComment {
+  id: number
+  path: string
+  line: number | null
+  body: string
+  url: string
+}
+
+export interface Review {
+  id: number
+  author: Author
+  state: ReviewState
+  body: string
+  url: string
+  comments: ReviewComment[]
+}
+
+export interface MarkedComment {
+  marker: string
+  body: string
+}
+
 export interface GitHub {
   getAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
   getRepository(repo: RepoRef): Promise<RepoRef | undefined>
@@ -51,6 +88,11 @@ export interface GitHub {
   findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined>
   openPullRequest(repo: RepoRef, pullRequest: NewPullRequest): Promise<PullRequest>
   requestTeamReview(repo: RepoRef, pullRequest: number, team: string): Promise<void>
+  isTeamMember(org: string, team: string, login: string): Promise<boolean>
+  getReview(repo: RepoRef, pullRequest: number, reviewId: number): Promise<Review | undefined>
+  createCommit(repo: RepoRef, commit: NewCommit): Promise<string>
+  moveBranch(repo: RepoRef, branch: string, move: BranchMove): Promise<boolean>
+  commentOnPullRequest(repo: RepoRef, pullRequest: number, comment: MarkedComment): Promise<void>
 }
 
 export interface PublishedVersion {

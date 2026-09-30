@@ -69,6 +69,34 @@ export interface FixOutcome {
   summary: string
 }
 
+export interface Feedback {
+  key: string
+  author: string
+  url: string
+  text: string
+}
+
+export type IterationVerdict = 'push' | 'unchanged' | 'rejected' | 'blocked'
+
+export interface Iteration {
+  number: number
+  feedback: Feedback[]
+  verdict: IterationVerdict
+  reason: string | null
+  fix: FixOutcome | null
+  commit: string | null
+  pushed: boolean
+}
+
+export interface ReviewLoop {
+  seen: string[]
+  instructions: Feedback[]
+  context: Feedback[]
+  iterations: number
+  current: Iteration | null
+  handOver: { by: string; url: string } | null
+}
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
@@ -77,6 +105,7 @@ export interface RunDetails {
   fix?: FixOutcome
   patchBranch?: BaseBranch
   pullRequest?: PullRequest
+  review?: ReviewLoop
 }
 
 export interface RunFailure {
@@ -150,6 +179,10 @@ export function transition(run: PatchRun, next: Transition, at: Date): PatchRun 
     version: run.version + 1,
     updatedAt: at
   }
+}
+
+export function annotate(run: PatchRun, details: Partial<RunDetails>, at: Date): PatchRun {
+  return { ...run, ...details, version: run.version + 1, updatedAt: at }
 }
 
 export function retry(run: PatchRun, at: Date): PatchRun {

@@ -2,8 +2,8 @@ import { patchBranchName, type NamingSettings } from '../naming.ts'
 import { patchCommitMessage, patchPrBody, patchPrTitle } from '../patch-pr.ts'
 import { DiffError, diffChanges } from '../unified-diff.ts'
 import { repoName } from '../upstream.ts'
-import type { FixOutcome, PatchRun, Step, Transition } from './patch-run.ts'
-import type { FixResult, Ports } from './ports.ts'
+import type { FixOutcome, PatchRun, RunState, Step, Transition } from './patch-run.ts'
+import type { FixRequest, FixResult, Ports, RunCost } from './ports.ts'
 
 export interface FixSettings extends NamingSettings {
   forkOrg: string
@@ -12,7 +12,7 @@ export interface FixSettings extends NamingSettings {
 
 const REASON_LIMIT = 1500
 
-function clip(text: string): string {
+export function clip(text: string): string {
   return text.length > REASON_LIMIT ? `${text.slice(0, REASON_LIMIT)}…` : text
 }
 
@@ -24,7 +24,7 @@ function prepared(run: PatchRun) {
   return { triage, release, fork, baseBranch }
 }
 
-function outcomeOf(result: FixResult): FixOutcome {
+export function outcomeOf(result: FixResult): FixOutcome {
   return {
     sessionId: result.session.id,
     diff: result.diff,
@@ -35,53 +35,62 @@ function outcomeOf(result: FixResult): FixOutcome {
   }
 }
 
-function notRedToGreen(fix: FixOutcome): string | undefined {
+export function redToGreenProblem(fix: FixOutcome): string | undefined {
   const problems = [
     ...(fix.regressionBefore.passed ? ['passes on the base branch'] : []),
     ...(fix.regressionAfter.passed ? [] : ['fails with the fix'])
   ]
   if (problems.length > 0) {
-    return `The fixer did not produce a red-to-green regression test: it ${problems.join(' and ')}.\n\n${clip(fix.summary)}`
+    return `The fixer did not produce a red-to-green regression test: it ${problems.join(' and ')}.`
   }
   if (!fix.diff.trim()) return 'The fixer reported red-to-green but its diff is empty.'
   return undefined
 }
 
-export function fixingSteps(
-  { github, fixer, modelAccess, store, notifier, clock }: Ports,
-  settings: FixSettings
-): { fixing: Step } {
+export function fixCost(runId: string, step: RunState, { cost }: FixResult, at: Date): RunCost {
+  return {
+    runId,
+    step,
+    inputTokens: cost.inputTokens + cost.cacheReadTokens + cost.cacheWriteTokens,
+    outputTokens: cost.outputTokens,
+    costUsd: cost.usd,
+    sandboxSeconds: cost.sandboxSeconds,
+    at
+  }
+}
+
+export async function fixWithToken(
+  { fixer, modelAccess }: Pick<Ports, 'fixer' | 'modelAccess'>,
+  request: Omit<FixRequest, 'modelToken'>
+): Promise<FixResult> {
+  const grant = await modelAccess.grant(request.runId)
+  try {
+    return await fixer.fix({ ...request, modelToken: grant.token })
+  } finally {
+    await grant.revoke()
+  }
+}
+
+export function fixingSteps(ports: Ports, settings: FixSettings): { fixing: Step } {
+  const { github, store, notifier, clock } = ports
+
   async function runFixer(run: PatchRun): Promise<Transition> {
     const { triage, fork, baseBranch } = prepared(run)
-    const grant = await modelAccess.grant(run.id)
-    let result: FixResult
-    try {
-      result = await fixer.fix({
-        runId: run.id,
-        advisory: run.advisory,
-        triage,
-        source: { repository: repoName(fork), branch: baseBranch.sha },
-        modelToken: grant.token,
-        instructions: [],
-        untrustedContext: []
-      })
-    } finally {
-      await grant.revoke()
-    }
-    const { cost } = result
-    await store.recordCost({
+    const result = await fixWithToken(ports, {
       runId: run.id,
-      step: run.state,
-      inputTokens: cost.inputTokens + cost.cacheReadTokens + cost.cacheWriteTokens,
-      outputTokens: cost.outputTokens,
-      costUsd: cost.usd,
-      sandboxSeconds: cost.sandboxSeconds,
-      at: clock.now()
+      advisory: run.advisory,
+      triage,
+      source: { repository: repoName(fork), branch: baseBranch.sha },
+      instructions: [],
+      untrustedContext: []
     })
+    await store.recordCost(fixCost(run.id, run.state, result, clock.now()))
     await store.saveSession(run.id, result.session)
     const fix = outcomeOf(result)
-    const problem = notRedToGreen(fix)
-    if (problem) return { to: 'needs-human', reason: problem, details: { fix } }
+    const problem = redToGreenProblem(fix)
+    if (problem) {
+      return { to: 'needs-human', reason: `${problem}\n\n${clip(fix.summary)}`, details: { fix } }
+    }
     return {
       to: 'fixing',
       reason: 'The regression test goes red to green; opening the patch PR.',

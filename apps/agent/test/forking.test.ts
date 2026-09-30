@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 import type { SecurityAdvisory } from '../src/advisory.ts'
 import type { Triage } from '../src/triage.ts'
 import { matchingPackage } from './fakes/builder.ts'
@@ -10,6 +11,21 @@ const ghsaId = 'GHSA-gxr4-xjj5-5px2'
 const fork = { owner: 'patchtogo-ai', repo: 'escape-html' }
 const upstream = { owner: 'component', repo: 'escape-html' }
 const baseBranch = 'ptg/base/escape-html/1.0.3'
+const previewWorkflowPath = '.github/workflows/patchtogo-preview.yml'
+
+interface Workflow {
+  on: unknown
+  permissions: unknown
+  jobs: Record<
+    string,
+    {
+      if?: string
+      permissions?: unknown
+      env?: Record<string, string>
+      steps: { uses?: string; run?: string }[]
+    }
+  >
+}
 
 const patch: Triage = {
   decision: 'patch',
@@ -112,10 +128,43 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(files['PATCHTOGO.md']).toContain('unofficial fork of the npm package `escape-html`')
       expect(files['PATCHTOGO.md']).toContain('The upstream licence text is in [LICENSE](LICENSE).')
       expect(files['.github/CODEOWNERS']).toBe('* @patchtogo-ai/reviewers\n')
-      expect(Object.keys(files).filter((path) => path.startsWith('.github/workflows/'))).toEqual([])
+      expect(Object.keys(files).filter((path) => path.startsWith('.github/workflows/'))).toEqual([
+        previewWorkflowPath
+      ])
       const upstreamFilesAtRelease = upstreamFiles('escape-html', '1.0.3')
       expect(files['index.js']).toBe(upstreamFilesAtRelease['index.js'])
       expect(files.LICENSE).toBe(upstreamFilesAtRelease.LICENSE)
+    })
+
+    it('adds a preview workflow that publishes patch branch pushes in the fork without secrets', async () => {
+      const test = await setup()
+      seedUpstream(test.github, test.registry, escapeHtml)
+
+      await test.run()
+
+      const text = test.github.fileAt(fork, baseBranch, previewWorkflowPath) ?? ''
+      const workflow = parse(text) as Workflow
+      expect(workflow.on).toEqual({ push: { branches: ['ptg/patch/**'] } })
+      expect(workflow.permissions).toEqual({})
+      expect(text).not.toMatch(/secrets\.|id-token|pull_request/)
+      const { build, publish } = workflow.jobs
+      expect(Object.keys(workflow.jobs)).toEqual(['build', 'publish'])
+      expect(build?.permissions).toEqual({ contents: 'read' })
+      expect(publish?.permissions).toEqual({})
+      for (const job of [build, publish]) {
+        expect(job?.if).toBe("github.repository == 'patchtogo-ai/escape-html'")
+        for (const step of job?.steps ?? []) {
+          if (step.uses) expect(step.uses).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/)
+        }
+      }
+      expect(build?.env).toMatchObject({
+        PTG_PACKAGE_DIR: '.',
+        PTG_README: 'README.md',
+        PTG_BEFORE: '2020-01-01T00:00:00.000Z'
+      })
+      expect(publish?.steps.at(-1)?.run).toMatch(
+        /^npx --yes pkg-pr-new@\d+\.\d+\.\d+ publish .*\.\/preview\/\*\.tgz$/
+      )
     })
 
     it('names a scoped monorepo package after its scope and finds its package tag', async () => {
@@ -167,6 +216,13 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
         'ships no licence file'
       )
       expect(test.github.fileAt(scoped, name, 'package.json')).toContain('acme-monorepo')
+      const workflow = parse(
+        test.github.fileAt(scoped, name, previewWorkflowPath) ?? ''
+      ) as Workflow
+      expect(workflow.jobs.build?.env).toMatchObject({
+        PTG_PACKAGE_DIR: 'packages/strings',
+        PTG_README: 'packages/strings/readme.markdown'
+      })
     })
 
     it('patches the latest published version inside the vulnerable range', async () => {
@@ -366,6 +422,39 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(test.builder.requests).toHaveLength(1)
       expect(test.github.commits.size).toBe(commits)
       expect(test.github.repository(fork)?.defaultBranch).toBe(baseBranch)
+    })
+
+    it('adds the preview workflow to a base branch cut before it existed, in one follow-up commit', async () => {
+      const test = await setup()
+      seedUpstream(test.github, test.registry, escapeHtml)
+      test.github.failNext('setDefaultBranch')
+      const failed = await test.run()
+      const forked = test.github.repository(fork)
+      const scaffolded = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
+      const { [previewWorkflowPath]: workflow, ...older } = scaffolded?.files ?? {}
+      const before = await test.github.createBranch(fork, {
+        name: 'ptg/older-scaffolding',
+        parent: scaffolded?.sha ?? '',
+        message: 'a base branch scaffolded without the preview workflow',
+        changes: [{ path: previewWorkflowPath, delete: true }]
+      })
+      forked?.branches.set(baseBranch, before)
+      forked?.branches.delete('ptg/older-scaffolding')
+
+      await test.pipeline.handle({ type: 'retry-requested', runId: failed?.id ?? '' })
+
+      const run = await test.store.getRun(failed?.id ?? '')
+      const head = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
+      expect(run).toMatchObject({
+        state: 'fixing',
+        baseBranch: { name: baseBranch, sha: head?.sha }
+      })
+      expect(head?.parent).toBe(before)
+      expect(head?.message).toMatch(
+        /^chore: update the patchtogo scaffolding for escape-html@1\.0\.3\n/
+      )
+      expect(head?.files).toEqual({ ...older, [previewWorkflowPath]: workflow })
+      expect(test.builder.requests).toHaveLength(1)
     })
 
     it('shares one fork between packages from the same repository', async () => {

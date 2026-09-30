@@ -16,7 +16,8 @@ export default defineConfig({
         items: [
           { text: 'Introduction', link: '/' },
           { text: 'Why patchtogo.ai', link: '/why-patchtogo' },
-          { text: 'How it works', link: '/how-it-works' }
+          { text: 'How it works', link: '/how-it-works' },
+          { text: 'Operations', link: '/operations' }
         ]
       }
     ],

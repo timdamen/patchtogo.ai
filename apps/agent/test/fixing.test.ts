@@ -135,6 +135,9 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       })
       const body = pr?.body ?? ''
       expect(body).toMatch(/^> \[!CAUTION\]\n> \*\*Unreviewed preview\.\*\*/)
+      expect(body).toContain(
+        `npm i https://pkg.pr.new/patchtogo-ai/escape-html/@patchtogo.ai/escape-html@${run?.patchBranch?.sha.slice(0, 7)}\n`
+      )
       for (const section of [
         '## Vulnerability',
         '## Triage',

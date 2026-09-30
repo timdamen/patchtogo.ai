@@ -6,7 +6,7 @@ import { throttling } from '@octokit/plugin-throttling'
 import { Octokit } from '@octokit/rest'
 import type { GitHubAppEnv } from './env.ts'
 import { parseGlobalAdvisory } from './github-advisories.ts'
-import type { GitHub, PullRequest, RepoRef } from './pipeline/ports.ts'
+import type { FileChange, GitHub, PullRequest, RepoRef } from './pipeline/ports.ts'
 import type { SourceArchive } from './sandbox.ts'
 import { repoName } from './upstream.ts'
 
@@ -126,6 +126,36 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     return found && { number: found.number, url: found.html_url }
   }
 
+  async function commitChanges(
+    repo: RepoRef,
+    parent: string,
+    message: string,
+    changes: FileChange[]
+  ): Promise<string> {
+    const { data: base } = await gh.rest.git.getCommit({ ...repo, commit_sha: parent })
+    const { data: tree } = await gh.rest.git.createTree({
+      ...repo,
+      base_tree: base.tree.sha,
+      tree: changes.map((change) =>
+        'delete' in change
+          ? { path: change.path, mode: '100644' as const, type: 'blob' as const, sha: null }
+          : {
+              path: change.path,
+              mode: change.mode ?? ('100644' as const),
+              type: 'blob' as const,
+              content: change.content
+            }
+      )
+    })
+    const { data: commit } = await gh.rest.git.createCommit({
+      ...repo,
+      message,
+      tree: tree.sha,
+      parents: [parent]
+    })
+    return commit.sha
+  }
+
   async function waitUntilReady(fork: RepoRef, branch: string): Promise<void> {
     const deadline = Date.now() + readyTimeoutMs
     while (!(await commitSha(fork, branch))) {
@@ -205,35 +235,21 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
     getBranch: branchSha,
 
     async createBranch(repo, { name, parent, message, changes }) {
-      const { data: base } = await gh.rest.git.getCommit({ ...repo, commit_sha: parent })
-      const { data: tree } = await gh.rest.git.createTree({
-        ...repo,
-        base_tree: base.tree.sha,
-        tree: changes.map((change) =>
-          'delete' in change
-            ? { path: change.path, mode: '100644' as const, type: 'blob' as const, sha: null }
-            : {
-                path: change.path,
-                mode: change.mode ?? ('100644' as const),
-                type: 'blob' as const,
-                content: change.content
-              }
-        )
-      })
-      const { data: commit } = await gh.rest.git.createCommit({
-        ...repo,
-        message,
-        tree: tree.sha,
-        parents: [parent]
-      })
+      const commit = await commitChanges(repo, parent, message, changes)
       try {
-        await gh.rest.git.createRef({ ...repo, ref: `refs/heads/${name}`, sha: commit.sha })
-        return commit.sha
+        await gh.rest.git.createRef({ ...repo, ref: `refs/heads/${name}`, sha: commit })
+        return commit
       } catch (error) {
         const existing = statusOf(error) === 422 ? await branchSha(repo, name) : undefined
         if (existing) return existing
         throw error
       }
+    },
+
+    async updateBranch(repo, { name, parent, message, changes }) {
+      const commit = await commitChanges(repo, parent, message, changes)
+      await gh.rest.git.updateRef({ ...repo, ref: `heads/${name}`, sha: commit, force: false })
+      return commit
     },
 
     async listBranches(repo) {

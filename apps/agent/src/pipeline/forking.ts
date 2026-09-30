@@ -2,7 +2,10 @@ import { posix } from 'node:path'
 import { baseBranchName, BRANCH_NAMESPACE, packageSlug } from '../naming.ts'
 import {
   findReadme,
+  packageFile,
   scaffolding,
+  scaffoldingUpdate,
+  scaffoldingWorkflows,
   WORKFLOWS_DIRECTORY,
   type Scaffolding,
   type ScaffoldingSettings
@@ -143,7 +146,7 @@ export function forkingSteps(
 
   async function scaffold(run: PatchRun, release: UpstreamRelease, fork: RepoRef) {
     const { sha } = release.commit
-    const at = (file: string) => posix.join(release.directory || '.', file)
+    const at = (file: string) => packageFile(release, file)
     const packageJson = await github.readFile(fork, sha, at('package.json'))
     if (packageJson === undefined) throw new Error(`${repoName(fork)} has no ${at('package.json')}`)
     const directoryFiles = await github.listFiles(fork, sha, release.directory)
@@ -160,6 +163,23 @@ export function forkingSteps(
       workflowFiles: await github.listFiles(fork, sha, WORKFLOWS_DIRECTORY),
       settings
     }) satisfies Scaffolding
+  }
+
+  async function completeScaffolding(
+    run: PatchRun,
+    release: UpstreamRelease,
+    fork: RepoRef,
+    branch: { name: string; sha: string }
+  ): Promise<string> {
+    const files = await github.listFiles(fork, branch.sha, release.directory)
+    const readmePath = findReadme(files) ?? packageFile(release, 'README.md')
+    const missing = []
+    for (const file of scaffoldingWorkflows({ release, fork, readmePath })) {
+      if ((await github.readFile(fork, branch.sha, file.path)) === undefined) missing.push(file)
+    }
+    if (missing.length === 0) return branch.sha
+    const { message, changes } = scaffoldingUpdate(run.packageName, release, missing)
+    return github.updateBranch(fork, { name: branch.name, parent: branch.sha, message, changes })
   }
 
   async function isolate(fork: RepoRef, baseBranch: string) {
@@ -191,7 +211,9 @@ export function forkingSteps(
       if (!release || !fork) throw new Error(`patch run ${run.id} has no fork to verify`)
       const name = baseBranchName(run.packageName, release.version)
       let sha = await github.getBranch(fork, name)
-      if (!sha) {
+      if (sha) {
+        sha = await completeScaffolding(run, release, fork, { name, sha })
+      } else {
         const mismatch = await tarballMismatch(run, release, fork)
         if (mismatch) return { to: 'needs-human', reason: mismatch }
         const { message, changes } = await scaffold(run, release, fork)

@@ -1,6 +1,5 @@
-import { PGlite, type PGliteInterface, type Transaction } from '@electric-sql/pglite'
+import type { PGliteInterface, Transaction } from '@electric-sql/pglite'
 import type { Database, Sql } from '../../src/postgres/database.ts'
-import { migrate } from '../../src/postgres/migrate.ts'
 
 function pgliteSql(client: PGliteInterface | Transaction): Sql {
   return {
@@ -19,11 +18,4 @@ export function pgliteDatabase(pglite: PGliteInterface): Database {
     ...pgliteSql(pglite),
     transaction: (work) => pglite.transaction((tx) => work(pgliteSql(tx)))
   }
-}
-
-export async function migratedDatabase(): Promise<{ pglite: PGliteInterface; db: Database }> {
-  const pglite = await PGlite.create()
-  const db = pgliteDatabase(pglite)
-  await migrate(db)
-  return { pglite, db }
 }

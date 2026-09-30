@@ -111,6 +111,7 @@ const pipeline = createPipeline(
     forkOrg: pipelineEnv.PTG_FORK_ORG,
     npmScope: pipelineEnv.PTG_NPM_SCOPE,
     reviewerTeam: pipelineEnv.PTG_REVIEWER_TEAM,
+    requiredApprovals: pipelineEnv.PTG_REQUIRED_APPROVALS,
     automation: pipelineEnv.PTG_AUTOMATION,
     automationPackages: pipelineEnv.PTG_AUTOMATION_PACKAGES
   }

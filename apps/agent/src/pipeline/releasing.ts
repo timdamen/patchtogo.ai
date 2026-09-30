@@ -6,24 +6,31 @@ import { repoName } from '../upstream.ts'
 import type { PatchRun, Step } from './patch-run.ts'
 import type { GitHub, Ports, RepoRef, ReviewRule } from './ports.ts'
 
-const REQUIRED_APPROVALS = 2
+export interface ReviewSettings {
+  reviewerTeam: string
+  requiredApprovals: number
+}
+
+export function approvals(count: number): string {
+  return count === 1 ? '1 approval' : `${count} approvals`
+}
 
 const everyFile = new Set(['*', '**', '**/*'])
 
-function enforcesReview(rule: ReviewRule): boolean {
+function enforcesReview(rule: ReviewRule, required: number): boolean {
   return (
-    rule.approvals >= REQUIRED_APPROVALS &&
+    rule.approvals >= required &&
     rule.codeOwnerReview &&
     rule.lastPushApproval &&
     rule.bypass === 'never'
   )
 }
 
-function teamApprovesEverything(rule: ReviewRule, team: string): boolean {
+function teamApprovesEverything(rule: ReviewRule, team: string, required: number): boolean {
   return rule.teamReviews.some(
     (review) =>
       review.team === team &&
-      review.approvals >= REQUIRED_APPROVALS &&
+      review.approvals >= required &&
       review.filePatterns.some((pattern) => everyFile.has(pattern))
   )
 }
@@ -46,11 +53,13 @@ export async function unprotectedBranch(
   github: GitHub,
   repo: RepoRef,
   branch: string,
-  team: string
+  { reviewerTeam: team, requiredApprovals }: ReviewSettings
 ): Promise<string | undefined> {
   const rules = await github.branchReviewRules(repo, branch)
-  const enforced = rules.filter(enforcesReview)
-  if (enforced.some((rule) => teamApprovesEverything(rule, team))) return undefined
+  const enforced = rules.filter((rule) => enforcesReview(rule, requiredApprovals))
+  if (enforced.some((rule) => teamApprovesEverything(rule, team, requiredApprovals))) {
+    return undefined
+  }
   const teamReviewsUnavailable = rules.every((rule) => rule.teamReviews.length === 0)
   if (
     enforced.length > 0 &&
@@ -60,7 +69,7 @@ export async function unprotectedBranch(
     return undefined
   }
   return [
-    `${branch} in ${repoName(repo)} is not protected: no active ruleset requires ${REQUIRED_APPROVALS} approvals from ${repo.owner}/${team} on every file, a code owner review and approval of the last push without letting patchtogo bypass it.`,
+    `${branch} in ${repoName(repo)} is not protected: no active ruleset requires ${approvals(requiredApprovals)} from ${repo.owner}/${team} on every file, a code owner review and approval of the last push without letting patchtogo bypass it.`,
     `Without team reviewers in the ruleset, ${CODEOWNERS_FILE} on the branch has to name only @${repo.owner}/${team}.`,
     'Create the organisation ruleset from the operator setup (https://patchtogo.ai/operations#protect-the-base-branches-once), then retry the run.'
   ].join(' ')

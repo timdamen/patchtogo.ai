@@ -241,8 +241,17 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
 
   describe('base branch protection', () => {
     const { rule } = baseBranchRuleset
+    const oneApprovalRuleset: FakeRuleset = {
+      ...baseBranchRuleset,
+      rule: {
+        ...rule,
+        approvals: 1,
+        teamReviews: [{ team: 'reviewers', approvals: 1, filePatterns: ['*'] }]
+      }
+    }
     const cases: [string, FakeRuleset[]][] = [
       ['no ruleset protects the base branch', []],
+      ['the ruleset asks for one approval, from the reviewer team too', [oneApprovalRuleset]],
       [
         'the ruleset asks for one approval',
         [{ ...baseBranchRuleset, rule: { ...rule, approvals: 1 } }]
@@ -300,6 +309,18 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
         expect(test.fixer.requests).toHaveLength(1)
       }
     )
+
+    it('opens the patch PR under a one-approval ruleset when PTG_REQUIRED_APPROVALS is 1', async () => {
+      const test = await setupPatchRun(await createStore(), [fixResult()], 'full', {
+        requiredApprovals: 1
+      })
+      test.github.rulesets = [oneApprovalRuleset]
+
+      await test.publish()
+
+      expect((await test.run())?.state).toBe('in-review')
+      expect(test.github.pullRequests[0]?.body).toContain('Merging needs 1 approval from the team')
+    })
   })
 
   it('accepts CODEOWNERS naming only the reviewer team when the ruleset has no team reviewers', async () => {

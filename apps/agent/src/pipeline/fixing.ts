@@ -4,11 +4,10 @@ import { DiffError, diffChanges } from '../unified-diff.ts'
 import { repoName } from '../upstream.ts'
 import type { FixOutcome, PatchRun, RunState, Step, Transition } from './patch-run.ts'
 import type { FixRequest, FixResult, Ports, RunCost, UpstreamTests } from './ports.ts'
-import { unprotectedBranch } from './releasing.ts'
+import { unprotectedBranch, type ReviewSettings } from './releasing.ts'
 
-export interface FixSettings extends NamingSettings {
+export interface FixSettings extends NamingSettings, ReviewSettings {
   forkOrg: string
-  reviewerTeam: string
 }
 
 const REASON_LIMIT = 1500
@@ -111,12 +110,7 @@ export function fixingSteps(ports: Ports, settings: FixSettings): { fixing: Step
 
   async function openPatchPr(run: PatchRun, fix: FixOutcome): Promise<Transition> {
     const { triage, release, fork, baseBranch } = prepared(run)
-    const unprotected = await unprotectedBranch(
-      github,
-      fork,
-      baseBranch.name,
-      settings.reviewerTeam
-    )
+    const unprotected = await unprotectedBranch(github, fork, baseBranch.name, settings)
     if (unprotected) throw new Error(unprotected)
     const name = patchBranchName(run.packageName, release.version, run.ghsaId)
     let sha = await github.getBranch(fork, name)

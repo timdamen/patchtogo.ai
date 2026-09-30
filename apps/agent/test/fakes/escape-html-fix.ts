@@ -114,8 +114,13 @@ export async function setupPatchRun(
   automation: Automation = 'full',
   {
     upstreamAccount = false,
-    classify
-  }: { upstreamAccount?: boolean; classify?: (comments: string[]) => Classification } = {}
+    classify,
+    requiredApprovals
+  }: {
+    upstreamAccount?: boolean
+    classify?: (comments: string[]) => Classification
+    requiredApprovals?: number
+  } = {}
 ) {
   const test = createTestPipeline({
     store,
@@ -123,7 +128,8 @@ export async function setupPatchRun(
     fixes,
     automation,
     upstreamAccount,
-    classify
+    classify,
+    requiredApprovals
   })
   const upstream = seedUpstream(test.github, test.registry, {
     name: 'escape-html',

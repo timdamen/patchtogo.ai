@@ -168,7 +168,6 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
       })
     }
     const reason = `${url} was closed without being merged, so the agent stopped working on it. Reopening the PR does not resume the run.`
-    await move(current, { to: 'needs-human', reason })
     await notifier.notify({
       type: 'needs-human',
       runId: run.id,
@@ -176,6 +175,7 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
       packageName: run.packageName,
       reason
     })
+    await move(current, { to: 'needs-human', reason })
   }
 
   async function stableReleaseCompleted(event: StableReleaseCompleted): Promise<void> {
@@ -210,7 +210,6 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
       if (!next?.details?.superseded) continue
       const current = await resumeFailed(run)
       if (!current) continue
-      if (!(await save(transition(current, next, clock.now())))) continue
       await notifier.notify({
         type: 'superseded',
         runId: run.id,
@@ -218,6 +217,7 @@ export function createPipeline(ports: Ports, settings: PipelineSettings): Pipeli
         packageName: run.packageName,
         ...next.details.superseded
       })
+      await save(transition(current, next, clock.now()))
     }
   }
 

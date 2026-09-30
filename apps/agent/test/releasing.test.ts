@@ -222,6 +222,20 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
     expect(test.notifier.notifications.at(-1)).toMatchObject({ type: 'needs-human', runId })
   })
 
+  it('stays in review until the reviewer channel heard that the patch PR was closed', async () => {
+    const test = await inReview()
+    test.notifier.failNext()
+
+    await expect(test.close(null)).rejects.toThrow('reviewer channel is down')
+
+    expect((await test.run())?.state).toBe('in-review')
+
+    await test.close(null)
+
+    expect((await test.run())?.state).toBe('needs-human')
+    expect(test.notifier.notifications.at(-1)).toMatchObject({ type: 'needs-human', runId })
+  })
+
   it('releases a patch PR that humans merge after the agent handed it over', async () => {
     const test = await inReview()
     test.github.addTeamMember('patchtogo-ai', 'reviewers', 'alice')

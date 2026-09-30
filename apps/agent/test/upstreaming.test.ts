@@ -245,6 +245,25 @@ describe.each(stores)('upstreaming and superseding on the %s store', (_name, cre
       }
     )
 
+    it('keeps the run released until the deprecate command reached the reviewer channel', async () => {
+      const test = await released()
+      const before = await test.run()
+      const fixed = { vulnerableRange: '< 1.0.4', patchedVersion: '1.0.4' }
+      test.notifier.failNext()
+
+      await expect(shipUpstream(test, '1.0.4', fixed)).rejects.toThrow('reviewer channel is down')
+
+      expect(await test.run()).toEqual(before)
+
+      await shipUpstream(test, '1.0.4', fixed)
+
+      expect((await test.run())?.state).toBe('superseded')
+      expect(test.notifier.notifications.at(-1)).toMatchObject({
+        type: 'superseded',
+        command: deprecate
+      })
+    })
+
     it.each([
       ['the advisory names no patched version yet', '1.0.4', '<= 1.0.3', null],
       ['the new version is still vulnerable', '1.0.4', '< 1.0.5', '1.0.5']

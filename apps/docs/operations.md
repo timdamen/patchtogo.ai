@@ -75,7 +75,20 @@ A base branch can still be created by anyone with write access. To close that to
 
 ### GitHub App
 
-It creates the release environment and its branch policy with Administration (read and write), which it already needs to set the default branch and enable Actions on a fork. It reads rules with Metadata, pull request merges with Pull requests and workflow runs with Actions (read), and it is already subscribed to the `pull_request` and `workflow_run` webhooks. Actions stays read-only on purpose, so the App can't re-run or start a release: re-running a failed release workflow is a human's click, or `gh run rerun <run id> --failed -R patchtogo-ai/<fork>`.
+It creates the release environment and its branch policy with Administration (read and write), which it already needs to set the default branch and enable Actions on a fork. It reads rules with Metadata, pull request merges with Pull requests and workflow runs with Actions (read). Actions stays read-only on purpose, so the App can't re-run or start a release: re-running a failed release workflow is a human's click, or `gh run rerun <run id> --failed -R patchtogo-ai/<fork>`.
+
+**Organisation permission Members: Read.** The agent asks GitHub whether a comment's author is an active member of the reviewer team, and it lists the organisation's teams to name the teams in a ruleset's `required_reviewers`. Without it GitHub answers both with "Resource not accessible by integration": every reviewer comment, review and hand-over label fails in the queue instead of reaching the run, so reviewers get no iteration and no reply, and every run with team reviewers in its ruleset fails at `fixing` before its patch pull request. The reviewer channel hears about neither; only `pnpm --filter agent retry` lists them.
+
+**Webhook subscriptions.** The App has to be subscribed to these events. GitHub delivers nothing it isn't subscribed to, and the agent can't tell a missing subscription from a quiet day:
+
+| Event                         | What the agent does with it                                    | Without it                                                                                      |
+| ----------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `issue_comment`               | conversation comments on a patch pull request                  | reviewers' comments never reach the agent                                                       |
+| `pull_request_review`         | submitted reviews, with their inline comments                  | reviews never start an iteration                                                                |
+| `pull_request_review_comment` | inline comments posted on their own                            | single inline comments are lost                                                                 |
+| `pull_request`                | the hand-over label, and a patch pull request closed or merged | a merge never moves the run to `approved`, and a closed pull request never ends the review loop |
+| `workflow_run`                | the stable release workflow finishing                          | a release stays in `approved` until someone runs `pnpm --filter agent retry <run>`              |
+| `security_advisory`           | new and updated GitHub advisories                              | advisories arrive only with the next poll, up to `PTG_POLL_INTERVAL_MINUTES` later              |
 
 ### npm
 

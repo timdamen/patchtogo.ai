@@ -2,7 +2,7 @@
 
 pnpm workspace on Node 24 (`packageManager` in the root `package.json` pins pnpm 12). Run commands from the repo root.
 
-patchtogo forks npm packages that have an unpatched CVE, fixes them in a public pull request and publishes the fix as `@patchtogo/<package>`. Preview builds come from every PR commit; stable releases need reviewer approval.
+patchtogo forks npm packages that have an unpatched CVE, fixes them in a public pull request and publishes the fix as `@patchtogo.ai/<package>`. Preview builds come from every PR commit; stable releases need reviewer approval.
 
 ## Layout
 

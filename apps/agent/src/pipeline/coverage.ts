@@ -2,8 +2,16 @@ import semver from 'semver'
 import { npmAdvisories, type Advisory } from '../advisory.ts'
 import { patchedPackageName, patchedVersion, type NamingSettings } from '../naming.ts'
 import { repositoryAdvisory, upstreamAdvisoryLine } from '../repository-advisory.ts'
+import { isTestAdvisory } from '../test-advisories.ts'
 import { parseVulnerableRange } from '../vulnerable-range.ts'
-import { newPatchRun, type PatchRun, type Step, type UpstreamRelease } from './patch-run.ts'
+import type { Hold } from './automation.ts'
+import {
+  newPatchRun,
+  type PatchRun,
+  type RepositoryAdvisoryRecord,
+  type Step,
+  type UpstreamRelease
+} from './patch-run.ts'
 import type { AffectedVersions, Ports, RepoRef, RepositoryAdvisory } from './ports.ts'
 import { watchedRuns } from './superseding.ts'
 
@@ -90,34 +98,45 @@ export function securityCoverage(
     })
   }
 
-  async function report({ advisory, released }: Omit<Coverage, 'basedOn'>): Promise<void> {
+  async function report(
+    { advisory, released }: Omit<Coverage, 'basedOn'>,
+    hold?: Hold
+  ): Promise<RepositoryAdvisoryRecord | undefined> {
     const fork = released.toSorted(byVersion).at(-1)?.fork
     const wanted = affectedVersions(advisory, released)
-    if (!fork || wanted.length === 0) return
+    if (!fork || wanted.length === 0) return undefined
+    if (hold) return { status: 'held', reason: hold.reason }
+    const patchedName = patchedPackageName(advisory.packageName, settings)
+    if (isTestAdvisory(advisory.ghsaId)) {
+      return {
+        status: 'dry-run',
+        repository: fork,
+        advisory: repositoryAdvisory(advisory, patchedName, wanted)
+      }
+    }
     const line = upstreamAdvisoryLine(advisory.ghsaId)
     const existing = (await github.listRepositoryAdvisories(fork)).find((published) =>
       published.description.includes(line)
     )
     const patched = wanted.find((entry) => entry.patched)?.patched ?? null
     if (!existing) {
-      const draft = repositoryAdvisory(
-        advisory,
-        patchedPackageName(advisory.packageName, settings),
-        wanted
-      )
+      const draft = repositoryAdvisory(advisory, patchedName, wanted)
       const created = await github.createRepositoryAdvisory(fork, draft)
       await github.updateRepositoryAdvisory(fork, created.ghsaId, { state: 'published' })
-      return announce(advisory, created, patched)
+      await announce(advisory, created, patched)
+      return { status: 'published', url: created.url }
     }
-    if (existing.state !== 'draft' && existing.state !== 'published') return
+    if (existing.state !== 'draft' && existing.state !== 'published') return undefined
+    const publishedRecord = { status: 'published', url: existing.url } as const
     const changed = versionsText(existing.vulnerabilities) !== versionsText(wanted)
-    if (!changed && existing.state === 'published') return
+    if (!changed && existing.state === 'published') return publishedRecord
     await github.updateRepositoryAdvisory(fork, existing.ghsaId, {
       vulnerabilities: wanted,
       state: 'published'
     })
     const newlyPatched = patched !== null && !existing.vulnerabilities.some((v) => v.patched)
     if (existing.state === 'draft' || newlyPatched) await announce(advisory, existing, patched)
+    return publishedRecord
   }
 
   async function currentAdvisory(run: PatchRun): Promise<Advisory> {
@@ -154,11 +173,11 @@ export function securityCoverage(
         const next = await step(run)
         if (next?.to !== 'released') return next
         const releasing = { ...run, ...next.details, state: next.to }
-        await report({
+        const record = await report({
           advisory: await currentAdvisory(run),
           released: await releasedRuns(run.packageName, releasing)
         })
-        return next
+        return record ? { ...next, details: { ...next.details, repositoryAdvisory: record } } : next
       }
     }
   }

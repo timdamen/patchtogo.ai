@@ -1,3 +1,4 @@
+import type { SecurityAdvisory } from '../advisory.ts'
 import type { PatchRun } from './patch-run.ts'
 import {
   StaleRunError,
@@ -24,6 +25,7 @@ export class InMemoryStore implements Store {
   #events: RunEvent[] = []
   #costs: RunCost[] = []
   #sessions = new Map<string, FixSession>()
+  #testAdvisories = new Map<string, SecurityAdvisory>()
 
   createRunIfAbsent(run: PatchRun): Promise<PatchRun> {
     let stored = this.#runs.get(run.id)
@@ -90,5 +92,15 @@ export class InMemoryStore implements Store {
   getSession(runId: string): Promise<FixSession | undefined> {
     const session = this.#sessions.get(runId)
     return Promise.resolve(session && structuredClone(session))
+  }
+
+  saveTestAdvisory(advisory: SecurityAdvisory): Promise<void> {
+    this.#testAdvisories.set(advisory.ghsaId, structuredClone(advisory))
+    return Promise.resolve()
+  }
+
+  getTestAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined> {
+    const advisory = this.#testAdvisories.get(ghsaId)
+    return Promise.resolve(advisory && structuredClone(advisory))
   }
 }

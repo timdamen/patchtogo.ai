@@ -1,4 +1,4 @@
-import type { Advisory } from '../advisory.ts'
+import type { Advisory, SecurityAdvisory } from '../advisory.ts'
 import type { PatchRun, RunDetails, RunFailure, RunState } from '../pipeline/patch-run.ts'
 import {
   StaleRunError,
@@ -273,5 +273,24 @@ export class PostgresStore implements Store {
       [runId]
     )
     return row && { id: row.session_id, transcript: row.transcript, totals: row.totals }
+  }
+
+  async saveTestAdvisory(advisory: SecurityAdvisory): Promise<void> {
+    await this.#db.query(
+      `insert into test_advisories (ghsa_id, advisory, updated_at)
+       values ($1, $2::jsonb, now())
+       on conflict (ghsa_id) do update set
+         advisory = excluded.advisory,
+         updated_at = excluded.updated_at`,
+      [advisory.ghsaId, json(advisory)]
+    )
+  }
+
+  async getTestAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined> {
+    const [row] = await this.#db.query<{ advisory: SecurityAdvisory }>(
+      'select advisory from test_advisories where ghsa_id = $1',
+      [ghsaId]
+    )
+    return row?.advisory
   }
 }

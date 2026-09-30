@@ -44,9 +44,7 @@ const CONTEXT_LIMIT = 20
 
 const TEXT_LIMIT = 8000
 
-export interface ReviewSettings extends FixSettings {
-  automation: Automation
-}
+export type HoldCheck = (run: PatchRun, action: string, needs: Automation) => Promise<boolean>
 
 interface Received {
   key: string
@@ -170,7 +168,7 @@ function keep(review: ReviewLoop, current: Iteration, reason: string): Transitio
   return { to: 'in-review', reason, details: { review: { ...review, current } } }
 }
 
-export function reviewLoop(ports: Ports, settings: ReviewSettings) {
+export function reviewLoop(ports: Ports, settings: FixSettings, held: HoldCheck) {
   const { github, store, clock } = ports
 
   async function runFor(pullRequest: PatchPullRequestRef): Promise<PatchRun | undefined> {
@@ -397,6 +395,7 @@ export function reviewLoop(ports: Ports, settings: ReviewSettings) {
   const step: Step = async (run) => {
     const review = reviewOf(run)
     if (review.handOver) {
+      if (await held(run, 'the hand-over reply', 'fork')) return undefined
       const { fork, pullRequest } = inReview(run)
       await github.commentOnPullRequest(fork, pullRequest.number, handOverReply(review.handOver))
       return {
@@ -404,14 +403,14 @@ export function reviewLoop(ports: Ports, settings: ReviewSettings) {
         reason: `Handed over to humans by @${review.handOver.by}: ${review.handOver.url}`
       }
     }
-    if (settings.automation !== 'full') return undefined
     const { current } = review
+    if (!current && review.instructions.length === 0) return undefined
+    if (await held(run, 'the review iteration', 'full')) return undefined
     if (current) {
       if (current.verdict === 'push' && !current.pushed) return push(run, review, current)
       return reply(run, review, current)
     }
-    if (review.instructions.length > 0) return startIteration(run, review)
-    return undefined
+    return startIteration(run, review)
   }
 
   return { record, step, runFor }

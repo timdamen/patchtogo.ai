@@ -1,4 +1,5 @@
 import { code, fenced } from './patch-pr.ts'
+import { testMarked } from './test-advisories.ts'
 import type { FixOutcome, PatchRun, UpstreamRelease } from './pipeline/patch-run.ts'
 import type { PullRequest, RepoRef } from './pipeline/ports.ts'
 import { repoName } from './upstream.ts'
@@ -13,7 +14,7 @@ export interface UpstreamPrInput {
 
 export function upstreamPrTitle(run: PatchRun): string {
   const cve = run.advisory.cveId ? ` (${run.advisory.cveId})` : ''
-  return `fix: close ${run.ghsaId}${cve}`
+  return testMarked(`fix: close ${run.ghsaId}${cve}`, run.ghsaId)
 }
 
 export function upstreamPrBody({

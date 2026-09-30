@@ -1,6 +1,13 @@
 import type { Advisory } from '../advisory.ts'
 import type { Triage } from '../triage.ts'
-import type { PullRequest, RepoRef, TestResult, UpstreamTests } from './ports.ts'
+import type { Hold } from './automation.ts'
+import type {
+  NewRepositoryAdvisory,
+  PullRequest,
+  RepoRef,
+  TestResult,
+  UpstreamTests
+} from './ports.ts'
 
 const runStates = [
   'detected',
@@ -129,6 +136,11 @@ export interface PatchedRelease {
   commit: string
 }
 
+export type RepositoryAdvisoryRecord =
+  | { status: 'published'; url: string }
+  | { status: 'dry-run'; repository: RepoRef; advisory: NewRepositoryAdvisory }
+  | { status: 'held'; reason: string }
+
 export interface RunDetails {
   triage: Triage | null
   release?: UpstreamRelease
@@ -142,6 +154,8 @@ export interface RunDetails {
   upstream?: UpstreamProposal
   superseded?: Superseded
   basedOn?: PatchedRelease
+  held?: Hold
+  repositoryAdvisory?: RepositoryAdvisoryRecord
 }
 
 export interface RunFailure {
@@ -208,6 +222,7 @@ export function transition(run: PatchRun, next: Transition, at: Date): PatchRun 
   const reason = next.reason ?? null
   return {
     ...run,
+    held: undefined,
     ...next.details,
     state: next.to,
     reason,

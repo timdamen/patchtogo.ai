@@ -1,4 +1,5 @@
 import type { Notification, Notifier } from './pipeline/ports.ts'
+import { testMarked } from './test-advisories.ts'
 
 const SUPPRESS_EMBEDS = 1 << 2
 const MAX_REASON_LENGTH = 1500
@@ -22,7 +23,10 @@ function detail(notification: Notification): string {
 export const consoleNotifier: Notifier = {
   async notify(notification) {
     console.log(
-      `${notification.type}: ${notification.ghsaId} ${notification.packageName}: ${detail(notification)}`
+      testMarked(
+        `${notification.type}: ${notification.ghsaId} ${notification.packageName}: ${detail(notification)}`,
+        notification.ghsaId
+      )
     )
   }
 }
@@ -102,7 +106,7 @@ export function createDiscordNotifier(options: {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          content: discordMessage(notification),
+          content: testMarked(discordMessage(notification), notification.ghsaId),
           allowed_mentions: { parse: [] },
           flags: SUPPRESS_EMBEDS
         })

@@ -1,4 +1,5 @@
 import { patchedPackageName, upstreamBranchName, type NamingSettings } from '../naming.ts'
+import { isTestAdvisory } from '../test-advisories.ts'
 import { DiffError, diffChanges } from '../unified-diff.ts'
 import { repoName } from '../upstream.ts'
 import {
@@ -96,17 +97,20 @@ export function upstreamingSteps(ports: Ports, settings: NamingSettings): { rele
       message: upstreamCommitMessage(input),
       changes
     })
+    const upstream = {
+      ...pending,
+      branch: { name, sha },
+      base,
+      compareUrl: compareUrl(release.repository, base, fork, name)
+    }
+    if (isTestAdvisory(run.ghsaId)) {
+      const reason = `${run.ghsaId} is a patchtogo test advisory, so the agent never proposes its fix upstream. ${name} in ${repoName(fork)} holds what the upstream pull request would contain; don't open one on ${repoName(release.repository)}.`
+      return { to: 'released', reason, details: { upstream: { ...upstream, blocked: reason } } }
+    }
     return {
       to: 'released',
       reason: `Pushed ${name} to ${repoName(fork)}: the fix and its regression test on top of ${repoName(release.repository)}@${release.commit.sha.slice(0, 7)}.`,
-      details: {
-        upstream: {
-          ...pending,
-          branch: { name, sha },
-          base,
-          compareUrl: compareUrl(release.repository, base, fork, name)
-        }
-      }
+      details: { upstream }
     }
   }
 

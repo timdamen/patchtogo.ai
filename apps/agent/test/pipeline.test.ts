@@ -318,7 +318,8 @@ describe.each(stores)('pipeline on the %s store', (_name, createStore) => {
         [3, 'triaged'],
         [4, 'forking'],
         [5, 'verifying'],
-        [6, 'fixing']
+        [6, 'fixing'],
+        [7, 'fixing']
       ])
       expect(events[1]?.failure).toMatchObject({ step: 'detected' })
       expect(events.at(-1)?.at).toEqual(clock.now())

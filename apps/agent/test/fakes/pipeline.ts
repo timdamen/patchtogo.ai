@@ -4,6 +4,7 @@ import { InMemoryStore } from '../../src/pipeline/memory-store.ts'
 import type { Automation } from '../../src/pipeline/automation.ts'
 import { createPipeline, type PipelineSettings } from '../../src/pipeline/pipeline.ts'
 import type { FixResult, Store } from '../../src/pipeline/ports.ts'
+import { withTestAdvisories } from '../../src/test-advisories.ts'
 import type { Triage } from '../../src/triage.ts'
 import { ScriptedBuilder } from './builder.ts'
 import { FakeClock } from './clock.ts'
@@ -18,6 +19,7 @@ interface TestPipelineOptions {
   fixes?: (FixResult | Error)[]
   store?: Store
   automation?: Automation
+  automationPackages?: string[]
   upstreamAccount?: boolean
   classify?: (comments: string[]) => Classification
 }
@@ -26,7 +28,8 @@ const testSettings: PipelineSettings = {
   forkOrg: 'patchtogo-ai',
   npmScope: 'patchtogo.ai',
   reviewerTeam: 'reviewers',
-  automation: 'fork'
+  automation: 'fork',
+  automationPackages: []
 }
 
 function unexpectedTriage(advisory: Advisory): Triage {
@@ -38,6 +41,7 @@ export function createTestPipeline({
   fixes,
   store = new InMemoryStore(),
   automation = testSettings.automation,
+  automationPackages = [],
   upstreamAccount = false,
   classify = () => ({ actionable: true, reply: '' })
 }: TestPipelineOptions = {}) {
@@ -55,10 +59,16 @@ export function createTestPipeline({
     clock: new FakeClock(),
     upstreamAccount: upstreamAccount ? github.upstreamAccount() : undefined
   }
-  const settings = { ...testSettings, automation }
+  const settings = { ...testSettings, automation, automationPackages }
+  const pipelinePorts = { ...ports, github: withTestAdvisories(github, store) }
   return {
     ...ports,
-    pipeline: createPipeline(ports, settings),
-    withAutomation: (level: Automation) => createPipeline(ports, { ...settings, automation: level })
+    pipeline: createPipeline(pipelinePorts, settings),
+    withAutomation: (level: Automation, packages = automationPackages) =>
+      createPipeline(pipelinePorts, {
+        ...settings,
+        automation: level,
+        automationPackages: packages
+      })
   }
 }

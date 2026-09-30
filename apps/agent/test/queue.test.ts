@@ -133,6 +133,7 @@ describe('the pipeline queue', { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(handled).toEqual([published('GHSA-bbbb')]), waitLong)
     expect(await listFailures({ store, queue })).toEqual({
       runs: [],
+      held: [],
       blockedAdvisories: ['GHSA-aaaa']
     })
 

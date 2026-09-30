@@ -136,7 +136,23 @@ The agent service reads `PTG_AUTOMATION`:
 - `fork`: runs are forked and verified, then stop before the fix.
 - `full`: runs go all the way to an open patch pull request, and released runs on to an upstream pull request.
 
-A run held back by a lower level waits in `triaged` or `fixing`. After raising the level, `pnpm --filter agent retry <GHSA-id>` resumes it from where it stopped.
+`PTG_AUTOMATION_PACKAGES`, a comma-separated list of npm package names, narrows that to chosen packages: a package that isn't on the list stays at `triage-only` whatever `PTG_AUTOMATION` says. Left empty, every package gets `PTG_AUTOMATION`. Every advisory is still triaged, so the list only decides which runs may act.
+
+One rule decides each package's level, and every step that acts beyond triage asks it first:
+
+| Step                                                           | Needs  |
+| -------------------------------------------------------------- | ------ |
+| forking and verifying (fork, tarball check, base branch)       | `fork` |
+| the fix and the patch pull request                             | `full` |
+| review iterations (fix, push, reply)                           | `full` |
+| the reply to a hand-over                                       | `fork` |
+| the release (checking npm after a merge, the release advisory) | `fork` |
+| the upstream pull request                                      | `full` |
+| a repository advisory for a later upstream advisory            | `fork` |
+
+A step that isn't allowed holds the run where it is and records why on the run (its reason and `held`), for example "Held before forking, which needs automation level fork: html-escaper is not in PTG_AUTOMATION_PACKAGES". A held repository advisory is recorded on the follow-up run as well. `pnpm --filter agent retry` lists held runs with that reason. After raising the level or listing the package (a Railway variable change redeploys the service), `pnpm --filter agent retry <GHSA-id>` resumes them from where they stopped, and delivers the advisory again when its repository advisory was held.
+
+Following up on a human's merge needs `fork` too, so `PTG_AUTOMATION=triage-only` stops everything the agent does on GitHub, releases included. See [Operations](/operations#staged-rollout) for the rollout and for test advisories.
 
 The sandbox reaches the model only through the agent's model proxy, with a token that is issued for one fix and revoked as soon as the fix ends, whether it succeeded or not. The fix session's transcript is stored in Postgres, outside the sandbox, so a review iteration can resume the same session.
 

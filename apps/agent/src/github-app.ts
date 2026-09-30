@@ -353,6 +353,36 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
       await gh.rest.actions.setGithubActionsPermissionsRepository({ ...repo, enabled: true })
     },
 
+    async ensureEnvironment(repo, { name, branches }) {
+      const environment = { ...repo, environment_name: name }
+      await gh.rest.repos.createOrUpdateEnvironment({
+        ...environment,
+        deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }
+      })
+      const { data } = await gh.rest.repos.listDeploymentBranchPolicies({
+        ...environment,
+        per_page: 100
+      })
+      const kept = new Set<string>()
+      for (const policy of data.branch_policies) {
+        if (policy.type === 'branch' && policy.name && branches.includes(policy.name)) {
+          kept.add(policy.name)
+        } else if (policy.id !== undefined) {
+          await gh.rest.repos.deleteDeploymentBranchPolicy({
+            ...environment,
+            branch_policy_id: policy.id
+          })
+        }
+      }
+      for (const branch of branches.filter((pattern) => !kept.has(pattern))) {
+        await gh.rest.repos.createDeploymentBranchPolicy({
+          ...environment,
+          name: branch,
+          type: 'branch'
+        })
+      }
+    },
+
     findPullRequest: openPullRequestFrom,
 
     async findPullRequestFrom(repo, { owner, branch }) {

@@ -16,6 +16,7 @@ import {
   type Scaffolding,
   type ScaffoldingSettings
 } from '../scaffolding.ts'
+import { RELEASE_ENVIRONMENT } from '../stable-workflow.ts'
 import { compareTarballs, describeMismatch } from '../tarball-match.ts'
 import { githubRepository, releaseRefs, repoName } from '../upstream.ts'
 import { parseVulnerableRange } from '../vulnerable-range.ts'
@@ -207,18 +208,18 @@ export function forkingSteps(
     const files = await github.listFiles(fork, branch.sha, release.directory)
     const readmePath = findReadme(files) ?? packageFile(release, 'README.md')
     const patchedName = patchedPackageName(run.packageName, settings)
-    const missing = []
+    const outdated = []
     for (const file of scaffoldingWorkflows({ release, fork, readmePath, patchedName })) {
-      if ((await github.readFile(fork, branch.sha, file.path)) === undefined) missing.push(file)
+      if ((await github.readFile(fork, branch.sha, file.path)) !== file.content) outdated.push(file)
     }
-    if (missing.length === 0) return branch.sha
-    const update = scaffoldingUpdate(run.packageName, release, missing)
+    if (outdated.length === 0) return branch.sha
+    const update = scaffoldingUpdate(run.packageName, release, outdated)
     if (await unprotectedBranch(github, fork, branch.name)) {
       return github.updateBranch(fork, { name: branch.name, parent: branch.sha, ...update })
     }
     const pullRequest = await proposeScaffolding(run, release, fork, branch, update)
     throw new Error(
-      `${branch.name} predates ${missing.map((file) => file.path).join(', ')} and is protected, so patchtogo opened ${pullRequest.url} to add them. Retry the run once reviewers have merged it.`
+      `${branch.name} predates the current ${outdated.map((file) => file.path).join(', ')} and is protected, so patchtogo opened ${pullRequest.url} to update them. Retry the run once reviewers have merged it.`
     )
   }
 
@@ -269,6 +270,7 @@ export function forkingSteps(
       const { release, fork } = run
       if (!release || !fork) throw new Error(`patch run ${run.id} has no fork to verify`)
       const name = baseBranchName(run.packageName, release.version)
+      await github.ensureEnvironment(fork, RELEASE_ENVIRONMENT)
       let sha = await github.getBranch(fork, name)
       if (sha) {
         sha = await completeScaffolding(run, release, fork, { name, sha })

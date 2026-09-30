@@ -487,6 +487,53 @@ describe('GitHub App adapter', () => {
     })
   })
 
+  it('limits the release environment to the base branches and drops any other branch policy', async () => {
+    const environment = '/repos/patchtogo-ai/escape-html/environments/patchtogo-release'
+    const { github, calls } = fakeGitHub(
+      on('PUT', environment, 200, { name: 'patchtogo-release' }),
+      on('GET', `${environment}/deployment-branch-policies`, 200, {
+        total_count: 3,
+        branch_policies: [
+          { id: 1, name: 'ptg/base/*/*', type: 'branch' },
+          { id: 2, name: '*', type: 'branch' },
+          { id: 3, name: 'ptg/base/*/*', type: 'tag' }
+        ]
+      }),
+      on('DELETE', `${environment}/deployment-branch-policies/2`, 204),
+      on('DELETE', `${environment}/deployment-branch-policies/3`, 204)
+    )
+
+    await github.ensureEnvironment(into, { name: 'patchtogo-release', branches: ['ptg/base/*/*'] })
+
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+      [
+        'PUT',
+        environment,
+        { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }
+      ],
+      ['DELETE', `${environment}/deployment-branch-policies/2`, undefined],
+      ['DELETE', `${environment}/deployment-branch-policies/3`, undefined]
+    ])
+  })
+
+  it('creates the base branch policy of a new release environment', async () => {
+    const environment = '/repos/patchtogo-ai/escape-html/environments/patchtogo-release'
+    const { github, calls } = fakeGitHub(
+      on('PUT', environment, 200, { name: 'patchtogo-release' }),
+      on('GET', `${environment}/deployment-branch-policies`, 200, {
+        total_count: 0,
+        branch_policies: []
+      }),
+      on('POST', `${environment}/deployment-branch-policies`, 200, { id: 4 })
+    )
+
+    await github.ensureEnvironment(into, { name: 'patchtogo-release', branches: ['ptg/base/*/*'] })
+
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
+      { name: 'ptg/base/*/*', type: 'branch' }
+    ])
+  })
+
   it("reads a branch's review rules and whether patchtogo can bypass each ruleset", async () => {
     const { github, calls } = fakeGitHub(
       on('GET', '/repos/patchtogo-ai/escape-html/rules/branches/ptg/base/escape-html/1.0.3', 200, [

@@ -5,6 +5,7 @@ import type { Author } from '../../src/pipeline/events.ts'
 import type {
   BranchMove,
   BranchOf,
+  DeploymentEnvironment,
   GitHub,
   MarkedComment,
   NewBranch,
@@ -37,6 +38,7 @@ export interface FakeRepository {
   tags: Map<string, string>
   actionsEnabled: boolean
   teams: Map<string, string>
+  environments: Map<string, string[]>
 }
 
 export interface NewRepository {
@@ -124,7 +126,8 @@ export class InMemoryGitHub implements GitHub {
       branches: new Map([defaultBranch, ...(init.branches ?? [])].map((b) => [b, sha])),
       tags: new Map((init.tags ?? []).map((tag) => [tag, sha])),
       actionsEnabled: false,
-      teams: new Map()
+      teams: new Map(),
+      environments: new Map()
     })
     return sha
   }
@@ -291,7 +294,8 @@ export class InMemoryGitHub implements GitHub {
       branches: new Map(source.branches),
       tags: new Map(source.tags),
       actionsEnabled: false,
-      teams: new Map()
+      teams: new Map(),
+      environments: new Map()
     })
     return { ...into }
   }
@@ -349,6 +353,12 @@ export class InMemoryGitHub implements GitHub {
 
   async enableActions(repo: RepoRef): Promise<void> {
     this.#existing(repo, 'enableActions').actionsEnabled = true
+  }
+
+  async ensureEnvironment(repo: RepoRef, environment: DeploymentEnvironment): Promise<void> {
+    this.#existing(repo, 'ensureEnvironment').environments.set(environment.name, [
+      ...environment.branches
+    ])
   }
 
   async findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined> {

@@ -60,14 +60,30 @@ The ruleset doesn't stop the App from creating a base branch (one ref at the sca
 
 Before it opens a patch pull request, the agent reads the rules that apply to the base branch (`GET /repos/{owner}/{repo}/rules/branches/{branch}`, plus each ruleset's `current_user_can_bypass`). Unless one active ruleset requires two approvals, a code owner review and approval of the last push, and patchtogo can't bypass it, the run fails at `fixing` without a pull request and keeps its fix. Create the ruleset and retry the run. Until the ruleset exists, `PTG_AUTOMATION=full` stops every run before its pull request.
 
+### Release environment
+
+The stable release workflow publishes from the `patchtogo-release` deployment environment, and npm trusts it only from there. The agent creates the environment on every fork during `verifying`, before it cuts or reuses a base branch, with one deployment branch policy, `ptg/base/*/*`, and it deletes any other policy it finds. Forks from before the environment existed get it on their next run, together with a scaffolding update that adds `environment: patchtogo-release` to their publish job.
+
+Without the environment, the workflow file on any branch of a fork could ask for an OIDC token that npm accepts: the reviewer team has write access, so one reviewer could push a branch that publishes with provenance and skip the two approvals. With it, only a run on a base branch reaches npm, and base branches change only through reviewed pull requests.
+
+A base branch can still be created by anyone with write access. To close that too, add a second organisation ruleset for `refs/heads/ptg/base/**` with only the `creation` rule and the patchtogo GitHub App as its one bypass actor, so only the App can create base branches. Keep it separate from the pull request ruleset, which must stay without bypass actors.
+
 ### GitHub App
 
-The App needs no new permissions. It reads rules with Metadata, pull request merges with Pull requests and workflow runs with Actions (read), and it is already subscribed to the `pull_request` and `workflow_run` webhooks. Actions stays read-only on purpose, so the App can't re-run or start a release: re-running a failed release workflow is a human's click, or `gh run rerun <run id> --failed -R patchtogo-ai/<fork>`.
+It creates the release environment and its branch policy with Administration (read and write), which it already needs to set the default branch and enable Actions on a fork. It reads rules with Metadata, pull request merges with Pull requests and workflow runs with Actions (read), and it is already subscribed to the `pull_request` and `workflow_run` webhooks. Actions stays read-only on purpose, so the App can't re-run or start a release: re-running a failed release workflow is a human's click, or `gh run rerun <run id> --failed -R patchtogo-ai/<fork>`.
 
 ### npm
 
 - The `patchtogo.ai` npm organisation owns the scope. Publishing the placeholder and `npm trust` need an owner with 2FA.
-- Each new package needs the one-time bootstrap from [How it works](/how-it-works#the-first-release-of-a-package). The needs-human message has the commands filled in for the package.
+- Each new package needs the one-time bootstrap from [How it works](/how-it-works#the-first-release-of-a-package). The needs-human message has the commands filled in for the package. The trusted publisher names the workflow and the environment:
+
+  ```bash
+  npm trust github @patchtogo.ai/<name> --repo patchtogo-ai/<fork> \
+    --file patchtogo-release.yml --environment patchtogo-release --allow-publish --yes
+  ```
+
+  A package trusted without `--environment` accepts a publish from any branch of its fork. Replace such a trusted publisher with this one.
+
 - `npm deprecate` can't use trusted publishing, so superseded packages are deprecated by hand. The "Superseded upstream" message in the reviewer channel has the command for the package and version.
 
 ### Upstream pull requests

@@ -153,7 +153,7 @@ describe.each(stores)('stable release on the %s store', (_name, createStore) => 
       for (const step of [
         `npm pkg set name=${patched} version=0.0.0-ptg.0`,
         'npm publish --access public --tag bootstrap',
-        `npm trust github ${patched} --repo ${repository} --file patchtogo-release.yml --allow-publish --yes`,
+        `npm trust github ${patched} --repo ${repository} --file patchtogo-release.yml --environment patchtogo-release --allow-publish --yes`,
         `https://github.com/${repository}/actions/workflows/patchtogo-release.yml?query=branch%3Aptg%2Fbase%2Fescape-html%2F1.0.3`
       ]) {
         expect(run?.reason).toContain(step)

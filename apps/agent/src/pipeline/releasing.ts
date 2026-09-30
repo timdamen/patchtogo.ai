@@ -1,5 +1,5 @@
 import { patchedPackageName, type NamingSettings } from '../naming.ts'
-import { STABLE_WORKFLOW_NAME } from '../stable-workflow.ts'
+import { RELEASE_ENVIRONMENT, STABLE_WORKFLOW_NAME } from '../stable-workflow.ts'
 import { repoName } from '../upstream.ts'
 import type { PatchRun, Step } from './patch-run.ts'
 import type { GitHub, Ports, RepoRef, ReviewRule } from './ports.ts'
@@ -34,7 +34,7 @@ function workflowRuns(fork: RepoRef, branch: string): string {
 }
 
 function trustCommand(name: string, fork: RepoRef): string {
-  return `npm trust github ${name} --repo ${repoName(fork)} --file ${STABLE_WORKFLOW_NAME} --allow-publish --yes`
+  return `npm trust github ${name} --repo ${repoName(fork)} --file ${STABLE_WORKFLOW_NAME} --environment ${RELEASE_ENVIRONMENT.name} --allow-publish --yes`
 }
 
 function firstPublish(run: PatchRun, name: string, fork: RepoRef, branch: string): string {

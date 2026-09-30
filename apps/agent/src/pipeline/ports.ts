@@ -82,6 +82,11 @@ export interface ReviewRule {
   bypass: string | null
 }
 
+export interface DeploymentEnvironment {
+  name: string
+  branches: string[]
+}
+
 export interface AffectedVersions {
   packageName: string
   range: string
@@ -126,6 +131,7 @@ export interface GitHub {
   deleteBranch(repo: RepoRef, branch: string): Promise<void>
   setDefaultBranch(repo: RepoRef, branch: string): Promise<void>
   enableActions(repo: RepoRef): Promise<void>
+  ensureEnvironment(repo: RepoRef, environment: DeploymentEnvironment): Promise<void>
   findPullRequest(repo: RepoRef, head: string): Promise<PullRequest | undefined>
   findPullRequestFrom(repo: RepoRef, head: BranchOf): Promise<PullRequest | undefined>
   pullRequestFiles(repo: RepoRef, pullRequest: number): Promise<string[]>

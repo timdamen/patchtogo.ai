@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import type { SecurityAdvisory } from '../src/advisory.ts'
+import type { FileChange } from '../src/pipeline/ports.ts'
 import type { Triage } from '../src/triage.ts'
 import { matchingPackage } from './fakes/builder.ts'
 import { createTestPipeline } from './fakes/pipeline.ts'
@@ -22,6 +23,7 @@ interface Workflow {
     {
       if?: string
       needs?: string | string[]
+      environment?: string
       permissions?: unknown
       env?: Record<string, string>
       steps: { uses?: string; run?: string }[]
@@ -66,33 +68,36 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
     return { ...test, run }
   }
 
-  async function olderBaseBranch() {
+  async function olderBaseBranch(
+    older: (workflows: { preview: string; stable: string }) => FileChange[] = () => [
+      { path: previewWorkflowPath, delete: true },
+      { path: stableWorkflow, delete: true }
+    ]
+  ) {
     const test = await setup()
     seedUpstream(test.github, test.registry, escapeHtml)
     test.github.failNext('setDefaultBranch')
     const failed = await test.run()
     const forked = test.github.repository(fork)
     const scaffolded = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
-    const {
-      [previewWorkflowPath]: preview,
-      [stableWorkflow]: stable,
-      ...older
-    } = scaffolded?.files ?? {}
+    const files = scaffolded?.files ?? {}
+    const workflows = {
+      preview: files[previewWorkflowPath] ?? '',
+      stable: files[stableWorkflow] ?? ''
+    }
     const before = await test.github.createBranch(fork, {
       name: 'ptg/older-scaffolding',
       parent: scaffolded?.sha ?? '',
-      message: 'a base branch scaffolded before the patchtogo workflows',
-      changes: [
-        { path: previewWorkflowPath, delete: true },
-        { path: stableWorkflow, delete: true }
-      ]
+      message: 'a base branch scaffolded before the current patchtogo workflows',
+      changes: older(workflows)
     })
     forked?.branches.set(baseBranch, before)
     forked?.branches.delete('ptg/older-scaffolding')
+    forked?.environments.clear()
     const retry = () => test.pipeline.handle({ type: 'retry-requested', runId: failed?.id ?? '' })
     const run = () => test.store.getRun(failed?.id ?? '')
     const head = () => test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
-    return { ...test, before, older, workflows: { preview, stable }, retry, run, head }
+    return { ...test, before, workflows, retry, run, head }
   }
 
   describe('happy path', () => {
@@ -119,6 +124,7 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect([...(forked?.branches.keys() ?? [])]).toEqual([baseBranch])
       expect(forked?.actionsEnabled).toBe(true)
       expect(forked?.teams.get('reviewers')).toBe('push')
+      expect(forked?.environments).toEqual(new Map([['patchtogo-release', ['ptg/base/*/*']]]))
       expect(test.builder.requests).toEqual([
         {
           runId: `${ghsaId}:escape-html`,
@@ -218,6 +224,8 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(gate?.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
       expect(build?.permissions).toEqual({ contents: 'read' })
       expect(publish?.permissions).toEqual({ 'id-token': 'write' })
+      expect(publish?.environment).toBe('patchtogo-release')
+      for (const job of [gate, build]) expect(job?.environment).toBeUndefined()
       expect(build?.needs).toBe('gate')
       expect(publish?.needs).toEqual(['gate', 'build'])
       for (const job of [gate, build, publish]) {
@@ -527,7 +535,7 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
         /^chore: update the patchtogo scaffolding for escape-html@1\.0\.3\n/
       )
       expect(head?.files).toEqual({
-        ...test.older,
+        ...test.github.commits.get(test.before)?.files,
         [previewWorkflowPath]: test.workflows.preview,
         [stableWorkflow]: test.workflows.stable
       })
@@ -565,6 +573,27 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
         state: 'fixing',
         baseBranch: { name: baseBranch, sha: merged }
       })
+    })
+
+    it('ties the release of a fork scaffolded before the release environment to its base branches', async () => {
+      const test = await olderBaseBranch(({ stable }) => {
+        const outdated = stable.replace(/^ {4}environment: patchtogo-release\n/m, '')
+        expect(outdated).not.toBe(stable)
+        return [{ path: stableWorkflow, content: outdated }]
+      })
+
+      await test.retry()
+
+      expect(test.github.repository(fork)?.environments).toEqual(
+        new Map([['patchtogo-release', ['ptg/base/*/*']]])
+      )
+      expect(await test.run()).toMatchObject({
+        state: 'failed',
+        failure: { step: 'verifying', error: expect.stringContaining('to update them') }
+      })
+      expect(
+        test.github.changedFiles(fork, baseBranch, 'ptg/scaffolding/escape-html/1.0.3')
+      ).toEqual({ [stableWorkflow]: test.workflows.stable })
     })
 
     it('shares one fork between packages from the same repository', async () => {

@@ -60,9 +60,9 @@ The scaffolding commit adds `.github/workflows/patchtogo-preview.yml` to the bas
 
 Install a preview with the link from the pull request, for example `npm i https://pkg.pr.new/patchtogo-ai/escape-html/@patchtogo.ai/escape-html@<commit>`. pkg.pr.new also comments on the pull request with the link for the latest commit.
 
-Base branches cut before a patchtogo workflow existed get it when a later run reuses them. The agent only adds missing files and never overwrites a workflow that is present, so changes to a workflow on an existing base branch go through a reviewed pull request:
+Base branches cut before the current patchtogo workflows get them when a later run reuses them. The agent compares both workflow files with the ones it would generate today and only touches those that are missing or differ:
 
-- On a base branch that isn't protected yet, it adds the missing workflows in one "update the patchtogo scaffolding" commit on top of the base branch and changes nothing else.
+- On a base branch that isn't protected yet, it adds or replaces them in one "update the patchtogo scaffolding" commit on top of the base branch and changes nothing else.
 - On a protected base branch it can't push, so it opens that same commit as a pull request from `ptg/scaffolding/<name>/<version>`, requests the reviewer team and fails the run at `verifying` with the link. Once reviewers have merged it, `pnpm --filter agent retry <run>` carries on. It never asks for a way around the protection.
 
 Neither kind of update publishes anything (see [Stable releases](#stable-releases)). An open patch pull request cut from the older base branch keeps its old head until it is rebased onto the updated base branch.
@@ -73,6 +73,7 @@ The scaffolding commit also adds `.github/workflows/patchtogo-release.yml`. The 
 
 - runs on pushes to `ptg/base/**` in the patchtogo fork, and a first `gate` job asks GitHub which pull request the pushed commit merged. Only the merge of a patch pull request (head `ptg/patch/…` in the same fork) goes on; the push that creates a base branch, a scaffolding update and anything else pushed to a base branch publish nothing. Every job also checks that it runs in the patchtogo fork.
 - builds in one job and publishes in another. The `gate` job reads pull requests, the `build` job reads the repository and runs the package's own build with the same script as the tarball-match check, and only the `publish` job may request an OIDC token (`id-token: write`). The publish job doesn't check out or build anything: it downloads the tarball and runs `npm publish --provenance --access public --tag latest --ignore-scripts`. There is no npm token anywhere; npm trusted publishing swaps the job's OIDC token for a short-lived one.
+- publishes from the `patchtogo-release` deployment environment. Before it cuts or reuses a base branch, the agent creates that environment on the fork with a single deployment branch policy, `ptg/base/*/*`, and removes any other policy. npm trusts the workflow only together with that environment (`npm trust … --environment patchtogo-release`), so the workflow file copied onto any other branch, which the reviewers' write access would allow, gets no token npm accepts. Only base branches, which the ruleset guards with two approvals, can publish.
 - picks the version itself. It asks npm for the versions already published and releases `<upstream version>-ptg.<N+1>`, so a later fix for the same upstream version gets the next number. It also records the merge commit as `gitHead` in the published `package.json`.
 - pins every action to a commit SHA, and runs the releases of one base branch one after another.
 
@@ -94,7 +95,7 @@ npm pkg set name=@patchtogo.ai/escape-html version=0.0.0-ptg.0 \
 npm publish --access public --tag bootstrap
 npm deprecate @patchtogo.ai/escape-html@0.0.0-ptg.0 "patchtogo placeholder, not a release"
 npm trust github @patchtogo.ai/escape-html --repo patchtogo-ai/escape-html \
-  --file patchtogo-release.yml --allow-publish --yes
+  --file patchtogo-release.yml --environment patchtogo-release --allow-publish --yes
 ```
 
 and sets the package's publishing access to "Require two-factor authentication and disallow tokens" on npmjs.com. Re-running the failed jobs of the release workflow then publishes the real release, and the run moves to `released`. `pnpm --filter agent retry <run>` resumes the run too; it then waits for the next successful workflow run.

@@ -172,16 +172,16 @@ export function scaffoldingWorkflows({
 export function scaffoldingUpdate(
   packageName: string,
   release: UpstreamRelease,
-  missing: ScaffoldingFile[]
+  outdated: ScaffoldingFile[]
 ): Scaffolding {
   const message = [
     `chore: update the patchtogo scaffolding for ${packageName}@${release.version}`,
     '',
-    `Adds ${missing.map((file) => file.path).join(', ')}, which this base branch predates. Nothing else changes.`,
+    `Adds or updates ${outdated.map((file) => file.path).join(', ')} to the current patchtogo version, which this base branch predates. Nothing else changes.`,
     '',
     `Patchtogo-Upstream: ${repoName(release.repository)}@${release.commit.sha}`
   ].join('\n')
-  return { message, changes: missing.map(({ path, content }) => ({ path, content })) }
+  return { message, changes: outdated.map(({ path, content }) => ({ path, content })) }
 }
 
 export function scaffolding(input: ScaffoldingInput): Scaffolding {

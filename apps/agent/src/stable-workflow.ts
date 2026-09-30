@@ -1,7 +1,7 @@
 import { posix } from 'node:path'
 import { buildEnv, buildScript } from './builder/build-script.ts'
 import { BASE_BRANCH_PREFIX, PATCH_BRANCH_PREFIX } from './naming.ts'
-import type { RepoRef } from './pipeline/ports.ts'
+import type { DeploymentEnvironment, RepoRef } from './pipeline/ports.ts'
 import {
   actions,
   actionVersions,
@@ -15,6 +15,11 @@ import {
 export const STABLE_WORKFLOW_FILE = '.github/workflows/patchtogo-release.yml'
 
 export const STABLE_WORKFLOW_NAME = posix.basename(STABLE_WORKFLOW_FILE)
+
+export const RELEASE_ENVIRONMENT: DeploymentEnvironment = {
+  name: 'patchtogo-release',
+  branches: [`${BASE_BRANCH_PREFIX}*/*`]
+}
 
 const packageName = /^@[a-z0-9._-]+\/[a-z0-9._-]+$/
 const version = /^[0-9A-Za-z.+-]+$/
@@ -169,6 +174,7 @@ export function stableReleaseWorkflow(input: StableWorkflowInput): string {
         if: released,
         'runs-on': 'ubuntu-latest',
         'timeout-minutes': 10,
+        environment: RELEASE_ENVIRONMENT.name,
         permissions: { 'id-token': 'write' },
         steps: [
           setupNode,

@@ -214,7 +214,7 @@ export function forkingSteps(
     }
     if (outdated.length === 0) return branch.sha
     const update = scaffoldingUpdate(run.packageName, release, outdated)
-    if (await unprotectedBranch(github, fork, branch.name)) {
+    if (await unprotectedBranch(github, fork, branch.name, settings.reviewerTeam)) {
       return github.updateBranch(fork, { name: branch.name, parent: branch.sha, ...update })
     }
     const pullRequest = await proposeScaffolding(run, release, fork, branch, update)

@@ -75,11 +75,18 @@ export interface BranchOf {
   branch: string
 }
 
+export interface TeamReview {
+  team: string | null
+  approvals: number
+  filePatterns: string[]
+}
+
 export interface ReviewRule {
   approvals: number
   codeOwnerReview: boolean
   lastPushApproval: boolean
   bypass: string | null
+  teamReviews: TeamReview[]
 }
 
 export interface DeploymentEnvironment {

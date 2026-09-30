@@ -52,13 +52,18 @@ JSON
 ```
 
 - `bypass_actors` stays empty: no role, team or app can merge without the reviews, and the App can't push to a base branch.
-- `required_reviewers` (team 19769979 is `reviewers`) is in beta on GitHub. If the API refuses it, leave it out: CODEOWNERS (`* @patchtogo-ai/reviewers`) still requires an approval from the reviewer team, and giving only the reviewer team write access to the forks keeps the second approval inside the team too.
+- `required_reviewers` (team 19769979 is `reviewers`) makes both approvals come from the reviewer team. It is in beta on GitHub. If the API refuses it, leave it out: CODEOWNERS (`* @patchtogo-ai/reviewers`) then requires one approval from the reviewer team, and the second approval stays inside the team only as long as nobody else has write access to the forks (organisation base permission "Read" or "No permission", and no outside collaborators).
 - `require_last_push_approval` means an approval given before the agent's last push doesn't count, so every review iteration needs fresh approvals.
 - If the organisation's plan has no organisation rulesets, create the same ruleset on each fork (`POST repos/patchtogo-ai/<fork>/rulesets`). The agent accepts either.
 
 The ruleset doesn't stop the App from creating a base branch (one ref at the scaffolding commit), only from changing one afterwards.
 
-Before it opens a patch pull request, the agent reads the rules that apply to the base branch (`GET /repos/{owner}/{repo}/rules/branches/{branch}`, plus each ruleset's `current_user_can_bypass`). Unless one active ruleset requires two approvals, a code owner review and approval of the last push, and patchtogo can't bypass it, the run fails at `fixing` without a pull request and keeps its fix. Create the ruleset and retry the run. Until the ruleset exists, `PTG_AUTOMATION=full` stops every run before its pull request.
+Before it opens a patch pull request, and before it pushes a scaffolding update to a base branch, the agent reads the rules that apply to the base branch (`GET /repos/{owner}/{repo}/rules/branches/{branch}`, plus each ruleset's `current_user_can_bypass`, and the organisation's teams to name the teams in `required_reviewers`). The branch counts as protected only when an active ruleset that patchtogo can't bypass requires two approvals, a code owner review and approval of the last push, and in addition either:
+
+- that ruleset's `required_reviewers` asks for at least two approvals from the reviewer team on every file (file pattern `*`, `**` or `**/*`), or
+- no rule on the branch has `required_reviewers` at all, because GitHub didn't accept or doesn't return it, and `.github/CODEOWNERS` on the base branch names the reviewer team and nobody else, with a `*` pattern. This fallback relies on the write-access condition above for the second approval; the agent can't check that.
+
+A `required_reviewers` entry for another team, for too few approvals or for only some files doesn't count, and the fallback doesn't apply once any rule has one. Otherwise the run fails at `fixing` without a pull request and keeps its fix. Create the ruleset and retry the run. Until the ruleset exists, `PTG_AUTOMATION=full` stops every run before its pull request.
 
 ### Release environment
 

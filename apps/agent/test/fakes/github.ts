@@ -86,7 +86,13 @@ type Method = Exclude<keyof GitHub, 'getAdvisory'>
 
 export const baseBranchRuleset: FakeRuleset = {
   branchPrefix: 'ptg/base/',
-  rule: { approvals: 2, codeOwnerReview: true, lastPushApproval: true, bypass: 'never' }
+  rule: {
+    approvals: 2,
+    codeOwnerReview: true,
+    lastPushApproval: true,
+    bypass: 'never',
+    teamReviews: [{ team: 'reviewers', approvals: 2, filePatterns: ['*'] }]
+  }
 }
 
 function key({ owner, repo }: RepoRef): string {
@@ -532,6 +538,6 @@ export class InMemoryGitHub implements GitHub {
     this.#existing(repo, 'branchReviewRules')
     return this.rulesets
       .filter((ruleset) => branch.startsWith(ruleset.branchPrefix))
-      .map((ruleset) => ({ ...ruleset.rule }))
+      .map((ruleset) => structuredClone(ruleset.rule))
   }
 }

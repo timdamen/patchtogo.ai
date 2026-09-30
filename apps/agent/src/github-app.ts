@@ -93,6 +93,14 @@ interface RepositoryData {
   source?: { full_name: string }
 }
 
+interface TeamReviewParameters {
+  required_reviewers?: {
+    reviewer: { id: number; type: string }
+    minimum_approvals: number
+    file_patterns: string[]
+  }[]
+}
+
 function refOf(data: RepositoryData): RepoRef {
   return { owner: data.owner.login, repo: data.name }
 }
@@ -506,7 +514,16 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
         per_page: 100
       })
       const reviews = rules.flatMap((rule) =>
-        rule.type === 'pull_request' ? [{ ...rule.parameters, rulesetId: rule.ruleset_id }] : []
+        rule.type === 'pull_request'
+          ? [
+              {
+                ...rule.parameters,
+                teamReviewers:
+                  (rule.parameters as TeamReviewParameters | undefined)?.required_reviewers ?? [],
+                rulesetId: rule.ruleset_id
+              }
+            ]
+          : []
       )
       const bypass = new Map<number, string | null>()
       for (const id of new Set(reviews.map((review) => review.rulesetId))) {
@@ -517,11 +534,21 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
         )
         bypass.set(id, ruleset?.data.current_user_can_bypass ?? null)
       }
+      const teams = new Map<number, string>()
+      if (reviews.some((review) => review.teamReviewers.length > 0)) {
+        const listed = await gh.paginate(gh.rest.teams.list, { org: repo.owner, per_page: 100 })
+        for (const team of listed) teams.set(team.id, team.slug)
+      }
       return reviews.map((review): ReviewRule => ({
         approvals: review.required_approving_review_count ?? 0,
         codeOwnerReview: review.require_code_owner_review ?? false,
         lastPushApproval: review.require_last_push_approval ?? false,
-        bypass: (review.rulesetId !== undefined && bypass.get(review.rulesetId)) || null
+        bypass: (review.rulesetId !== undefined && bypass.get(review.rulesetId)) || null,
+        teamReviews: review.teamReviewers.map((required) => ({
+          team: teams.get(required.reviewer.id) ?? null,
+          approvals: required.minimum_approvals,
+          filePatterns: required.file_patterns
+        }))
       }))
     },
 

@@ -101,7 +101,12 @@ export function fixingSteps(ports: Ports, settings: FixSettings): { fixing: Step
 
   async function openPatchPr(run: PatchRun, fix: FixOutcome): Promise<Transition> {
     const { triage, release, fork, baseBranch } = prepared(run)
-    const unprotected = await unprotectedBranch(github, fork, baseBranch.name)
+    const unprotected = await unprotectedBranch(
+      github,
+      fork,
+      baseBranch.name,
+      settings.reviewerTeam
+    )
     if (unprotected) throw new Error(unprotected)
     const name = patchBranchName(run.packageName, release.version, run.ghsaId)
     let sha = await github.getBranch(fork, name)

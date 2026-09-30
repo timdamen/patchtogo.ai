@@ -208,6 +208,27 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
       [
         'patchtogo can bypass the ruleset',
         [{ ...baseBranchRuleset, rule: { ...rule, bypass: 'always' } }]
+      ],
+      [
+        'the ruleset needs only one approval from the reviewer team',
+        [
+          {
+            ...baseBranchRuleset,
+            rule: {
+              ...rule,
+              teamReviews: [{ team: 'reviewers', approvals: 1, filePatterns: ['*'] }]
+            }
+          }
+        ]
+      ],
+      [
+        'the ruleset needs the approvals from another team',
+        [
+          {
+            ...baseBranchRuleset,
+            rule: { ...rule, teamReviews: [{ team: 'others', approvals: 2, filePatterns: ['*'] }] }
+          }
+        ]
       ]
     ]
 
@@ -237,6 +258,32 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
         expect(test.fixer.requests).toHaveLength(1)
       }
     )
+  })
+
+  it('accepts CODEOWNERS naming only the reviewer team when the ruleset has no team reviewers', async () => {
+    const test = await setup([fixResult()])
+    test.github.rulesets = [
+      { ...baseBranchRuleset, rule: { ...baseBranchRuleset.rule, teamReviews: [] } }
+    ]
+    test.github.failNext('setDefaultBranch')
+    await test.publish()
+    const codeOwners = (owners: string) =>
+      test.github.pushCommit(fork, baseBranch, 'change code owners', {
+        '.github/CODEOWNERS': `* ${owners}\n`
+      })
+
+    codeOwners('@patchtogo-ai/reviewers @mallory')
+    await test.retry()
+
+    expect(await test.run()).toMatchObject({
+      state: 'failed',
+      failure: { step: 'fixing', error: expect.stringContaining('is not protected') }
+    })
+
+    codeOwners('@patchtogo-ai/reviewers')
+    await test.retry()
+
+    expect((await test.run())?.state).toBe('in-review')
   })
 
   describe('run tokens', () => {

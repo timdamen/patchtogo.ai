@@ -1,6 +1,7 @@
 import { patchedPackageName, type NamingSettings } from './naming.ts'
 import type { FixOutcome, PatchRun, UpstreamRelease } from './pipeline/patch-run.ts'
 import type { RepoRef, TestResult, UpstreamTests } from './pipeline/ports.ts'
+import { approvals, type ReviewSettings } from './pipeline/releasing.ts'
 import { previewInstallUrl } from './preview-workflow.ts'
 import { isTestAdvisory, testMarked } from './test-advisories.ts'
 import type { Triage } from './triage.ts'
@@ -14,7 +15,7 @@ export interface PatchPrInput {
   baseBranch: string
   patchCommit: string
   fix: FixOutcome
-  settings: NamingSettings & { forkOrg: string; reviewerTeam: string }
+  settings: NamingSettings & ReviewSettings & { forkOrg: string }
 }
 
 const OUTPUT_LIMIT = 4000
@@ -142,7 +143,7 @@ export function patchPrBody({
     '> [!CAUTION]',
     '> **Unreviewed preview.** This patch was written by an AI agent and has not been reviewed yet.',
     `> Preview builds of this pull request are not approved by the reviewer team: use one only as an emergency stopgap.`,
-    `> A stable \`${patched}\` release is published only after two reviewer approvals and a human merge.`,
+    `> A stable \`${patched}\` release is published only after ${approvals(settings.requiredApprovals)} from the reviewer team and a human merge.`,
     '',
     `Unreviewed preview of the patch commit ${patchCommit.slice(0, 7)}, published by [pkg.pr.new](https://pkg.pr.new) once the preview workflow has run:`,
     '',
@@ -211,7 +212,7 @@ export function patchPrBody({
     '## Review',
     '',
     `This pull request targets ${code(baseBranch)} in ${repoName(fork)}, which holds the upstream release plus the patchtogo scaffolding. Its diff contains only the fix and the regression test.`,
-    `Review is requested from the ${code(`${settings.forkOrg}/${settings.reviewerTeam}`)} team. Merging needs two approvals from the team and is done by a human, never by the agent.`,
+    `Review is requested from the ${code(`${settings.forkOrg}/${settings.reviewerTeam}`)} team. Merging needs ${approvals(settings.requiredApprovals)} from the team and is done by a human, never by the agent.`,
     '',
     `<sub>patchtogo run ${code(run.id)}, fix session ${code(fix.sessionId)}</sub>`
   ].join('\n')

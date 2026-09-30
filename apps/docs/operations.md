@@ -62,7 +62,7 @@ The pkg.pr.new comment on a patch pull request comes from the `pkg-pr-new[bot]` 
 
 ### Protect the base branches once
 
-Every base branch needs a ruleset that requires two approvals and that nobody, the patchtogo GitHub App included, can bypass. The App has no organisation administration permission, so an organisation owner creates one ruleset for the whole organisation:
+Every base branch needs a ruleset that requires `PTG_REQUIRED_APPROVALS` approvals (2 by default) and that nobody, the patchtogo GitHub App included, can bypass. The App has no organisation administration permission, so an organisation owner creates one ruleset for the whole organisation. The command below asks for 2; set `required_approving_review_count` and `minimum_approvals` to the value of `PTG_REQUIRED_APPROVALS` (the patchtogo-ai organisation currently runs with 1):
 
 ```bash
 gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
@@ -97,16 +97,16 @@ JSON
 ```
 
 - `bypass_actors` stays empty: no role, team or app can merge without the reviews, and the App can't push to a base branch.
-- `required_reviewers` (team 19769979 is `reviewers`) makes both approvals come from the reviewer team. It is in beta on GitHub. If the API refuses it, leave it out: CODEOWNERS (`* @patchtogo-ai/reviewers`) then requires one approval from the reviewer team, and the second approval stays inside the team only as long as nobody else has write access to the forks (organisation base permission "Read" or "No permission", and no outside collaborators).
+- `required_reviewers` (team 19769979 is `reviewers`) makes every required approval come from the reviewer team. It is in beta on GitHub. If the API refuses it, leave it out: CODEOWNERS (`* @patchtogo-ai/reviewers`) then requires one approval from the reviewer team, and any further approvals stay inside the team only as long as nobody else has write access to the forks (organisation base permission "Read" or "No permission", and no outside collaborators).
 - `require_last_push_approval` means an approval given before the agent's last push doesn't count, so every review iteration needs fresh approvals.
 - If the organisation's plan has no organisation rulesets, create the same ruleset on each fork (`POST repos/patchtogo-ai/<fork>/rulesets`). The agent accepts either.
 
 The ruleset doesn't stop the App from creating a base branch (one ref at the scaffolding commit), only from changing one afterwards.
 
-Before it opens a patch pull request, and before it pushes a scaffolding update to a base branch, the agent reads the rules that apply to the base branch (`GET /repos/{owner}/{repo}/rules/branches/{branch}`, plus each ruleset's `current_user_can_bypass`, and the organisation's teams to name the teams in `required_reviewers`). The branch counts as protected only when an active ruleset that patchtogo can't bypass requires two approvals, a code owner review and approval of the last push, and in addition either:
+Before it opens a patch pull request, and before it pushes a scaffolding update to a base branch, the agent reads the rules that apply to the base branch (`GET /repos/{owner}/{repo}/rules/branches/{branch}`, plus each ruleset's `current_user_can_bypass`, and the organisation's teams to name the teams in `required_reviewers`). The branch counts as protected only when an active ruleset that patchtogo can't bypass requires at least `PTG_REQUIRED_APPROVALS` approvals, a code owner review and approval of the last push, and in addition either:
 
-- that ruleset's `required_reviewers` asks for at least two approvals from the reviewer team on every file (file pattern `*`, `**` or `**/*`), or
-- no rule on the branch has `required_reviewers` at all, because GitHub didn't accept or doesn't return it, and `.github/CODEOWNERS` on the base branch names the reviewer team and nobody else, with a `*` pattern. This fallback relies on the write-access condition above for the second approval; the agent can't check that.
+- that ruleset's `required_reviewers` asks for at least `PTG_REQUIRED_APPROVALS` approvals from the reviewer team on every file (file pattern `*`, `**` or `**/*`), or
+- no rule on the branch has `required_reviewers` at all, because GitHub didn't accept or doesn't return it, and `.github/CODEOWNERS` on the base branch names the reviewer team and nobody else, with a `*` pattern. With more than one required approval, this fallback relies on the write-access condition above for the others; the agent can't check that.
 
 A `required_reviewers` entry for another team, for too few approvals or for only some files doesn't count, and the fallback doesn't apply once any rule has one. Otherwise the run fails at `fixing` without a pull request and keeps its fix. Create the ruleset and retry the run. Until the ruleset exists, `PTG_AUTOMATION=full` stops every run before its pull request.
 
@@ -114,7 +114,7 @@ A `required_reviewers` entry for another team, for too few approvals or for only
 
 The stable release workflow publishes from the `patchtogo-release` deployment environment, and npm trusts it only from there. The agent creates the environment on every fork during `verifying`, before it cuts or reuses a base branch, with one deployment branch policy, `ptg/base/*/*`, and it deletes any other policy it finds. Forks from before the environment existed get it on their next run, together with a scaffolding update that adds `environment: patchtogo-release` to their publish job.
 
-Without the environment, the workflow file on any branch of a fork could ask for an OIDC token that npm accepts: the reviewer team has write access, so one reviewer could push a branch that publishes with provenance and skip the two approvals. With it, only a run on a base branch reaches npm, and base branches change only through reviewed pull requests.
+Without the environment, the workflow file on any branch of a fork could ask for an OIDC token that npm accepts: the reviewer team has write access, so one reviewer could push a branch that publishes with provenance and skip the required approvals. With it, only a run on a base branch reaches npm, and base branches change only through reviewed pull requests.
 
 A base branch can still be created by anyone with write access. To close that too, add a second organisation ruleset for `refs/heads/ptg/base/**/*` with only the `creation` rule and the patchtogo GitHub App as its one bypass actor, so only the App can create base branches. Keep it separate from the pull request ruleset, which must stay without bypass actors.
 

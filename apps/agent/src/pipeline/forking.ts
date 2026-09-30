@@ -22,9 +22,9 @@ import { githubRepository, releaseRefs, repoName } from '../upstream.ts'
 import { parseVulnerableRange } from '../vulnerable-range.ts'
 import type { PatchRun, Step, Transition, UpstreamRelease } from './patch-run.ts'
 import type { PullRequest, Ports, PublishedVersion, RepoRef } from './ports.ts'
-import { unprotectedBranch } from './releasing.ts'
+import { unprotectedBranch, type ReviewSettings } from './releasing.ts'
 
-export interface ForkSettings extends ScaffoldingSettings {
+export interface ForkSettings extends ScaffoldingSettings, ReviewSettings {
   forkOrg: string
 }
 
@@ -214,7 +214,7 @@ export function forkingSteps(
     }
     if (outdated.length === 0) return branch.sha
     const update = scaffoldingUpdate(run.packageName, release, outdated)
-    if (await unprotectedBranch(github, fork, branch.name, settings.reviewerTeam)) {
+    if (await unprotectedBranch(github, fork, branch.name, settings)) {
       return github.updateBranch(fork, { name: branch.name, parent: branch.sha, ...update })
     }
     const pullRequest = await proposeScaffolding(run, release, fork, branch, update)

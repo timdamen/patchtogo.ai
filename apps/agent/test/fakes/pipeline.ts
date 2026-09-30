@@ -20,6 +20,7 @@ interface TestPipelineOptions {
   store?: Store
   automation?: Automation
   automationPackages?: string[]
+  requiredApprovals?: number
   upstreamAccount?: boolean
   classify?: (comments: string[]) => Classification
 }
@@ -28,6 +29,7 @@ const testSettings: PipelineSettings = {
   forkOrg: 'patchtogo-ai',
   npmScope: 'patchtogo.ai',
   reviewerTeam: 'reviewers',
+  requiredApprovals: 2,
   automation: 'fork',
   automationPackages: []
 }
@@ -42,6 +44,7 @@ export function createTestPipeline({
   store = new InMemoryStore(),
   automation = testSettings.automation,
   automationPackages = [],
+  requiredApprovals = testSettings.requiredApprovals,
   upstreamAccount = false,
   classify = () => ({ actionable: true, reply: '' })
 }: TestPipelineOptions = {}) {
@@ -59,7 +62,7 @@ export function createTestPipeline({
     clock: new FakeClock(),
     upstreamAccount: upstreamAccount ? github.upstreamAccount() : undefined
   }
-  const settings = { ...testSettings, automation, automationPackages }
+  const settings = { ...testSettings, automation, automationPackages, requiredApprovals }
   const pipelinePorts = { ...ports, github: withTestAdvisories(github, store) }
   return {
     ...ports,

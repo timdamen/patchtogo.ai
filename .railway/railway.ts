@@ -43,6 +43,8 @@ export default defineRailway(() => {
       VERCEL_TEAM_ID: preserve(),
       VERCEL_PROJECT_ID: preserve(),
       PTG_MAX_CONCURRENT_RUNS: '2',
+      PTG_WEBHOOK_MAX_MB: '25',
+      PTG_MODEL_PROXY_MAX_MB: '32',
       PTG_FORK_ORG: 'patchtogo-ai',
       PTG_NPM_SCOPE: 'patchtogo.ai',
       PTG_REVIEWER_TEAM: 'reviewers',

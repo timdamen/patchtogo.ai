@@ -45,3 +45,16 @@ The agent service reads `PTG_AUTOMATION`:
 A run held back by a lower level waits in `triaged` or `fixing`. After raising the level, `pnpm --filter agent retry <GHSA-id>` resumes it from where it stopped.
 
 The sandbox reaches the model only through the agent's model proxy, with a token that is issued for one fix and revoked as soon as the fix ends, whether it succeeded or not. The fix session's transcript is stored in Postgres, outside the sandbox, so a review iteration can resume the same session.
+
+## Running the agent service
+
+The agent service is a Fastify server on Node's own HTTP stack. It serves `/health`, the GitHub webhook and the model proxy, and forwards model requests to Anthropic with undici, streaming the response back as it arrives. Cancelling a proxied request, or disconnecting mid-stream, cancels the request to Anthropic too.
+
+Request bodies are capped, and a larger body gets a 413 while it is still arriving, before it is buffered or its signature is checked:
+
+- `PTG_WEBHOOK_MAX_MB` (default 25): GitHub caps webhook payloads at 25 MB and doesn't deliver larger ones.
+- `PTG_MODEL_PROXY_MAX_MB` (default 32): the Messages and Token Counting APIs reject requests over 32 MB.
+
+The request log is JSON (Pino) and includes request headers, with `authorization`, `x-api-key`, cookies and webhook signatures redacted.
+
+On `SIGTERM` (a Railway redeploy gives the old instance 30 seconds) the service stops polling and accepting connections, gives open requests 10 seconds before cutting any proxy stream still running, and gives pg-boss 20 seconds to finish the jobs in flight, all within a 25-second deadline. It exits 0 when that completes and 1 when it doesn't. A fix session can run for 40 minutes, so shutdown doesn't wait for one: pg-boss fails the job it was part of, and retries it (up to 3 times, with backoff) on the next instance, which picks the run up from the state it was in and starts the fix step again. An uncaught exception or unhandled rejection is logged, goes through the same shutdown, and exits 1, so Railway restarts the service.

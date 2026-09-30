@@ -1,28 +1,110 @@
-import { Hono } from 'hono'
+import Fastify, {
+  type FastifyPluginAsync,
+  type FastifyRequest,
+  type FastifyServerOptions
+} from 'fastify'
 import type { Webhooks } from '@octokit/webhooks'
 
-export function createServer(webhooks: Webhooks, options: { modelProxy?: Hono } = {}) {
-  const app = new Hono()
+const GITHUB_WEBHOOK_MAX_BYTES = 25 * 1024 * 1024
+const CLOSE_GRACE_MS = 10_000
 
-  if (options.modelProxy) app.route('/model-proxy', options.modelProxy)
+const REDACTED_HEADERS = [
+  'authorization',
+  'x-api-key',
+  'x-hub-signature',
+  'x-hub-signature-256',
+  'cookie',
+  'set-cookie',
+  'proxy-authorization'
+]
 
-  app.get('/health', (c) => c.json({ ok: true }))
+const LOGGER = {
+  level: 'info',
+  redact: {
+    paths: REDACTED_HEADERS.map((name) => `req.headers["${name}"]`),
+    censor: '[redacted]'
+  },
+  serializers: {
+    req: (request: FastifyRequest) => ({
+      method: request.method,
+      url: request.url,
+      headers: request.headers,
+      remoteAddress: request.ip
+    })
+  }
+} satisfies FastifyServerOptions['logger']
 
-  app.post('/webhooks/github', async (c) => {
-    const id = c.req.header('x-github-delivery')
-    const name = c.req.header('x-github-event')
-    const signature = c.req.header('x-hub-signature-256')
-    if (!id || !name || !signature) return c.json({ error: 'missing GitHub headers' }, 400)
+export interface ServerOptions {
+  modelProxy?: FastifyPluginAsync
+  webhookMaxBytes?: number
+  closeGraceMs?: number
+  logger?: boolean
+}
 
-    const payload = await c.req.text()
-    if (!(await webhooks.verify(payload, signature))) {
-      return c.json({ error: 'invalid signature' }, 401)
+export function createServer(webhooks: Webhooks, options: ServerOptions = {}) {
+  const {
+    webhookMaxBytes = GITHUB_WEBHOOK_MAX_BYTES,
+    closeGraceMs = CLOSE_GRACE_MS,
+    logger = false
+  } = options
+
+  const app = Fastify({ logger: logger && LOGGER })
+
+  app.setErrorHandler((error: { statusCode?: number; message: string }, request, reply) => {
+    const status = error.statusCode ?? 500
+    if (status >= 500) {
+      request.log.error(error)
+      return reply.code(status).send({ error: 'internal error' })
     }
+    return reply.code(status).send({ error: error.message })
+  })
 
-    await webhooks.receive({ id, name, payload: JSON.parse(payload) } as Parameters<
-      Webhooks['receive']
-    >[0])
-    return c.body(null, 202)
+  app.addHook('preClose', (done) => {
+    setTimeout(() => app.server.closeAllConnections(), closeGraceMs).unref()
+    done()
+  })
+
+  if (options.modelProxy) app.register(options.modelProxy, { prefix: '/model-proxy' })
+
+  app.get('/health', async () => ({ ok: true }))
+
+  app.register(async (github) => {
+    github.removeAllContentTypeParsers()
+    github.addContentTypeParser('*', { parseAs: 'string' }, (_request, body, done) =>
+      done(null, body)
+    )
+
+    github.post(
+      '/webhooks/github',
+      {
+        bodyLimit: webhookMaxBytes,
+        onRequest: async (request, reply) => {
+          const { headers } = request
+          if (
+            !headers['x-github-delivery'] ||
+            !headers['x-github-event'] ||
+            !headers['x-hub-signature-256']
+          ) {
+            return reply.code(400).send({ error: 'missing GitHub headers' })
+          }
+        }
+      },
+      async (request, reply) => {
+        const id = String(request.headers['x-github-delivery'])
+        const name = String(request.headers['x-github-event'])
+        const signature = String(request.headers['x-hub-signature-256'])
+        const payload = typeof request.body === 'string' ? request.body : ''
+
+        if (!(await webhooks.verify(payload, signature))) {
+          return reply.code(401).send({ error: 'invalid signature' })
+        }
+
+        await webhooks.receive({ id, name, payload: JSON.parse(payload) } as Parameters<
+          Webhooks['receive']
+        >[0])
+        return reply.code(202).send()
+      }
+    )
   })
 
   return app

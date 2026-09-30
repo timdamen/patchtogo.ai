@@ -1,43 +1,27 @@
-import { stringify } from 'yaml'
 import { buildEnv, buildScript } from './builder/build-script.ts'
 import { PATCH_BRANCH_PREFIX } from './naming.ts'
 import type { RepoRef } from './pipeline/ports.ts'
 import { repoName } from './upstream.ts'
+import {
+  actions,
+  actionVersions as versions,
+  safeBefore,
+  safeDirectory,
+  safeFile,
+  safeRepository,
+  setupNode,
+  workflowYaml
+} from './workflow-parts.ts'
 
 export const PREVIEW_WORKFLOW_FILE = '.github/workflows/patchtogo-preview.yml'
 
 const PKG_PR_NEW = 'pkg-pr-new@0.0.88'
-
-const actions = {
-  checkout: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
-  setupNode: 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
-  uploadArtifact: 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-  downloadArtifact: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
-}
-
-const versions = {
-  checkout: 'v7.0.1',
-  setupNode: 'v7.0.0',
-  uploadArtifact: 'v7.0.1',
-  downloadArtifact: 'v8.0.1'
-}
 
 export interface PreviewWorkflowInput {
   fork: RepoRef
   directory: string
   readmePath: string
   publishedAt: string | null
-}
-
-const safeName = /^[A-Za-z0-9._-]+$/
-const safePath = /^[A-Za-z0-9._@+-]+(\/[A-Za-z0-9._@+-]+)*$/
-const isoDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
-
-function checked(value: string, pattern: RegExp, what: string): string {
-  if (!pattern.test(value) || value.split('/').includes('..')) {
-    throw new Error(`the preview workflow cannot use the ${what} ${JSON.stringify(value)}`)
-  }
-  return value
 }
 
 const markPreview = String.raw`node - <<'PTG_PREVIEW'
@@ -60,19 +44,11 @@ fs.writeFileSync(env.PTG_README, banner + "\n\n" + readme)
 PTG_PREVIEW`
 
 export function previewWorkflow(input: PreviewWorkflowInput): string {
-  const repository = [
-    checked(input.fork.owner, safeName, 'owner'),
-    checked(input.fork.repo, safeName, 'repository')
-  ].join('/')
-  const directory = input.directory ? checked(input.directory, safePath, 'directory') : '.'
-  const readme = checked(input.readmePath, safePath, 'README path')
-  const before = input.publishedAt ? checked(input.publishedAt, isoDate, 'publish time') : ''
+  const repository = safeRepository(input.fork)
+  const directory = safeDirectory(input.directory)
+  const readme = safeFile(input.readmePath, 'README path')
+  const before = safeBefore(input.publishedAt)
   const onlyHere = `github.repository == '${repository}'`
-  const setupNode = {
-    name: `Set up Node.js (actions/setup-node ${versions.setupNode})`,
-    uses: actions.setupNode,
-    with: { 'node-version': 24, 'package-manager-cache': false }
-  }
   const workflow = {
     name: 'patchtogo preview (unreviewed)',
     on: { push: { branches: [`${PATCH_BRANCH_PREFIX}**`] } },
@@ -143,7 +119,7 @@ export function previewWorkflow(input: PreviewWorkflowInput): string {
       }
     }
   }
-  return stringify(workflow, { version: '1.1', lineWidth: 0, aliasDuplicateObjects: false })
+  return workflowYaml(workflow)
 }
 
 export function previewInstallUrl(fork: RepoRef, packageName: string, commit: string): string {

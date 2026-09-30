@@ -58,6 +58,17 @@ const forkData = {
   source: { full_name: 'component/escape-html' }
 }
 
+const reviewRule = (count: number) => ({
+  type: 'pull_request',
+  parameters: {
+    required_approving_review_count: count,
+    require_code_owner_review: true,
+    require_last_push_approval: true,
+    dismiss_stale_reviews_on_push: true,
+    required_review_thread_resolution: false
+  }
+})
+
 describe('GitHub App adapter', () => {
   it('reuses an existing fork of the upstream repository', async () => {
     const { github, calls } = fakeGitHub(
@@ -451,5 +462,32 @@ describe('GitHub App adapter', () => {
         posts ? [{ body: '<!-- patchtogo:iteration:1 -->\nnew' }] : []
       )
     })
+  })
+
+  it("reads a branch's review rules and whether patchtogo can bypass each ruleset", async () => {
+    const { github, calls } = fakeGitHub(
+      on('GET', '/repos/patchtogo-ai/escape-html/rules/branches/ptg/base/escape-html/1.0.3', 200, [
+        { ...reviewRule(2), ruleset_source_type: 'Organization', ruleset_id: 11 },
+        { type: 'deletion', ruleset_source_type: 'Organization', ruleset_id: 11 },
+        { ...reviewRule(1), ruleset_source_type: 'Repository', ruleset_id: 12 }
+      ]),
+      on('GET', '/repos/patchtogo-ai/escape-html/rulesets/11', 200, {
+        id: 11,
+        current_user_can_bypass: 'never'
+      }),
+      on('GET', '/repos/patchtogo-ai/escape-html/rulesets/12', 200, {
+        id: 12,
+        current_user_can_bypass: 'always'
+      })
+    )
+
+    const rules = await github.branchReviewRules(into, 'ptg/base/escape-html/1.0.3')
+
+    expect(rules).toEqual([
+      { approvals: 2, codeOwnerReview: true, lastPushApproval: true, bypass: 'never' },
+      { approvals: 1, codeOwnerReview: true, lastPushApproval: true, bypass: 'always' }
+    ])
+    const lookups = calls.filter((c) => c.path.includes('/rulesets/'))
+    expect(lookups.map((c) => c.query.get('includes_parents'))).toEqual(['true', 'true'])
   })
 })

@@ -146,6 +146,26 @@ describe('pull request feedback webhook', () => {
         label: 'patchtogo: hand over',
         sender: { login: 'alice', bot: false }
       }
+    ],
+    [
+      'a merged patch PR',
+      'pull_request',
+      {
+        action: 'closed',
+        repository,
+        pull_request: { ...pullRequestPayload, merged: true, merge_commit_sha: 'c'.repeat(40) }
+      },
+      { type: 'pull-request-closed', pullRequest, mergeCommit: 'c'.repeat(40) }
+    ],
+    [
+      'a patch PR closed without merging',
+      'pull_request',
+      {
+        action: 'closed',
+        repository,
+        pull_request: { ...pullRequestPayload, merged: false, merge_commit_sha: 'c'.repeat(40) }
+      },
+      { type: 'pull-request-closed', pullRequest, mergeCommit: null }
     ]
   ])('turns %s into a pipeline event', async (_case, name, payload, event) => {
     const { events, deliver } = feedbackWebhook()

@@ -14,6 +14,7 @@ import {
   runId,
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
+import { baseBranchRuleset, type FakeRuleset } from './fakes/github.ts'
 import { stores } from './support/stores.ts'
 
 describe.each(stores)('fixing and the patch PR on the %s store', (_name, createStore) => {
@@ -194,6 +195,48 @@ describe.each(stores)('fixing and the patch PR on the %s store', (_name, createS
         reason: expect.stringContaining('index.js: the hunk at line 1 does not match the base')
       })
     })
+  })
+
+  describe('base branch protection', () => {
+    const { rule } = baseBranchRuleset
+    const cases: [string, FakeRuleset[]][] = [
+      ['no ruleset protects the base branch', []],
+      [
+        'the ruleset asks for one approval',
+        [{ ...baseBranchRuleset, rule: { ...rule, approvals: 1 } }]
+      ],
+      [
+        'patchtogo can bypass the ruleset',
+        [{ ...baseBranchRuleset, rule: { ...rule, bypass: 'always' } }]
+      ]
+    ]
+
+    it.each(cases)(
+      'keeps the patch PR closed when %s, and opens it on retry once the branch is protected',
+      async (_case, rulesets) => {
+        const test = await setup([fixResult()])
+        test.github.rulesets = rulesets
+
+        await test.publish()
+
+        expect(await test.run()).toMatchObject({
+          state: 'failed',
+          failure: {
+            step: 'fixing',
+            error: expect.stringContaining(
+              `${baseBranch} in patchtogo-ai/escape-html is not protected`
+            )
+          }
+        })
+        expect(test.github.pullRequests).toEqual([])
+
+        test.github.rulesets = [baseBranchRuleset]
+        await test.retry()
+
+        expect((await test.run())?.state).toBe('in-review')
+        expect(test.fixer.requests).toHaveLength(1)
+      }
+    )
   })
 
   describe('run tokens', () => {

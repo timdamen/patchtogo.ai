@@ -4,7 +4,7 @@ export interface NamingSettings {
 
 export const BRANCH_NAMESPACE = 'ptg/'
 
-const BASE_BRANCH_PREFIX = `${BRANCH_NAMESPACE}base/`
+export const BASE_BRANCH_PREFIX = `${BRANCH_NAMESPACE}base/`
 
 export const PATCH_BRANCH_PREFIX = `${BRANCH_NAMESPACE}patch/`
 
@@ -24,6 +24,10 @@ export function patchedVersion(upstreamVersion: string, release: number): string
 
 export function baseBranchName(packageName: string, upstreamVersion: string): string {
   return `${BASE_BRANCH_PREFIX}${packageSlug(packageName)}/${upstreamVersion}`
+}
+
+export function scaffoldingBranchName(packageName: string, upstreamVersion: string): string {
+  return `${BRANCH_NAMESPACE}scaffolding/${packageSlug(packageName)}/${upstreamVersion}`
 }
 
 export function patchBranchName(

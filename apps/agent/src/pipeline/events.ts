@@ -1,3 +1,4 @@
+import type { WorkflowRun } from './patch-run.ts'
 import type { RepoRef } from './ports.ts'
 
 export interface AdvisoryPublished {
@@ -60,4 +61,25 @@ export type PullRequestFeedback =
   | ReviewCommentCreated
   | PullRequestLabeled
 
-export type PipelineEvent = AdvisoryPublished | RetryRequested | PullRequestFeedback
+export interface PullRequestClosed {
+  type: 'pull-request-closed'
+  pullRequest: PatchPullRequestRef
+  mergeCommit: string | null
+}
+
+export interface StableReleaseCompleted {
+  type: 'stable-release-completed'
+  repository: RepoRef
+  headRepository: RepoRef
+  trigger: string
+  branch: string
+  commit: string
+  workflowRun: WorkflowRun
+}
+
+export type PipelineEvent =
+  | AdvisoryPublished
+  | RetryRequested
+  | PullRequestFeedback
+  | PullRequestClosed
+  | StableReleaseCompleted

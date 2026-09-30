@@ -6,7 +6,7 @@ import {
   someoneElsePushed
 } from '../review-reply.ts'
 import { DiffError, diffChanges } from '../unified-diff.ts'
-import { repoName } from '../upstream.ts'
+import { repoName, sameRepository } from '../upstream.ts'
 import type { Automation } from './automation.ts'
 import type {
   Author,
@@ -78,10 +78,6 @@ function asksForHandOver(bodies: string[]): boolean {
   return bodies.some((body) =>
     body.split(/\r?\n/).some((line) => line.trim().toLowerCase() === HAND_OVER_COMMAND)
   )
-}
-
-function sameRepository(a: { owner: string; repo: string }, b: { owner: string; repo: string }) {
-  return repoName(a).toLowerCase() === repoName(b).toLowerCase()
 }
 
 function acceptsFeedback(run: PatchRun): boolean {
@@ -397,5 +393,5 @@ export function reviewLoop(ports: Ports, settings: ReviewSettings) {
     return undefined
   }
 
-  return { record, step }
+  return { record, step, runFor }
 }

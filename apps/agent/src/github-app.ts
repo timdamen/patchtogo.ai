@@ -13,6 +13,7 @@ import type {
   NewCommit,
   PullRequest,
   RepoRef,
+  ReviewRule,
   ReviewState
 } from './pipeline/ports.ts'
 import type { SourceArchive } from './sandbox.ts'
@@ -387,6 +388,32 @@ export function createGitHubApp(gh: Octokit, options: GitHubAppOptions = {}): Gi
         gh.rest.pulls.get({ ...repo, pull_number: pullRequest })
       )
       return response?.data.head.ref
+    },
+
+    async branchReviewRules(repo, branch) {
+      const rules = await gh.paginate(gh.rest.repos.getBranchRules, {
+        ...repo,
+        branch,
+        per_page: 100
+      })
+      const reviews = rules.flatMap((rule) =>
+        rule.type === 'pull_request' ? [{ ...rule.parameters, rulesetId: rule.ruleset_id }] : []
+      )
+      const bypass = new Map<number, string | null>()
+      for (const id of new Set(reviews.map((review) => review.rulesetId))) {
+        if (id === undefined) continue
+        const ruleset = await unlessStatus(
+          [404],
+          gh.rest.repos.getRepoRuleset({ ...repo, ruleset_id: id, includes_parents: true })
+        )
+        bypass.set(id, ruleset?.data.current_user_can_bypass ?? null)
+      }
+      return reviews.map((review): ReviewRule => ({
+        approvals: review.required_approving_review_count ?? 0,
+        codeOwnerReview: review.require_code_owner_review ?? false,
+        lastPushApproval: review.require_last_push_approval ?? false,
+        bypass: (review.rulesetId !== undefined && bypass.get(review.rulesetId)) || null
+      }))
     },
 
     async sourceArchive(source) {

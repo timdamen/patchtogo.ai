@@ -70,6 +70,13 @@ export interface MarkedComment {
   body: string
 }
 
+export interface ReviewRule {
+  approvals: number
+  codeOwnerReview: boolean
+  lastPushApproval: boolean
+  bypass: string | null
+}
+
 export interface GitHub {
   getAdvisory(ghsaId: string): Promise<SecurityAdvisory | undefined>
   getRepository(repo: RepoRef): Promise<RepoRef | undefined>
@@ -93,6 +100,7 @@ export interface GitHub {
   createCommit(repo: RepoRef, commit: NewCommit): Promise<string>
   moveBranch(repo: RepoRef, branch: string, move: BranchMove): Promise<boolean>
   commentOnPullRequest(repo: RepoRef, pullRequest: number, comment: MarkedComment): Promise<void>
+  branchReviewRules(repo: RepoRef, branch: string): Promise<ReviewRule[]>
 }
 
 export interface PublishedVersion {

@@ -12,6 +12,7 @@ const fork = { owner: 'patchtogo-ai', repo: 'escape-html' }
 const upstream = { owner: 'component', repo: 'escape-html' }
 const baseBranch = 'ptg/base/escape-html/1.0.3'
 const previewWorkflowPath = '.github/workflows/patchtogo-preview.yml'
+const stableWorkflow = '.github/workflows/patchtogo-release.yml'
 
 interface Workflow {
   on: unknown
@@ -20,6 +21,7 @@ interface Workflow {
     string,
     {
       if?: string
+      needs?: string | string[]
       permissions?: unknown
       env?: Record<string, string>
       steps: { uses?: string; run?: string }[]
@@ -62,6 +64,35 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       return test.store.getRun(`${ghsaId}:${packageNames[0]}`)
     }
     return { ...test, run }
+  }
+
+  async function olderBaseBranch() {
+    const test = await setup()
+    seedUpstream(test.github, test.registry, escapeHtml)
+    test.github.failNext('setDefaultBranch')
+    const failed = await test.run()
+    const forked = test.github.repository(fork)
+    const scaffolded = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
+    const {
+      [previewWorkflowPath]: preview,
+      [stableWorkflow]: stable,
+      ...older
+    } = scaffolded?.files ?? {}
+    const before = await test.github.createBranch(fork, {
+      name: 'ptg/older-scaffolding',
+      parent: scaffolded?.sha ?? '',
+      message: 'a base branch scaffolded before the patchtogo workflows',
+      changes: [
+        { path: previewWorkflowPath, delete: true },
+        { path: stableWorkflow, delete: true }
+      ]
+    })
+    forked?.branches.set(baseBranch, before)
+    forked?.branches.delete('ptg/older-scaffolding')
+    const retry = () => test.pipeline.handle({ type: 'retry-requested', runId: failed?.id ?? '' })
+    const run = () => test.store.getRun(failed?.id ?? '')
+    const head = () => test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
+    return { ...test, before, older, workflows: { preview, stable }, retry, run, head }
   }
 
   describe('happy path', () => {
@@ -128,9 +159,11 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(files['PATCHTOGO.md']).toContain('unofficial fork of the npm package `escape-html`')
       expect(files['PATCHTOGO.md']).toContain('The upstream licence text is in [LICENSE](LICENSE).')
       expect(files['.github/CODEOWNERS']).toBe('* @patchtogo-ai/reviewers\n')
-      expect(Object.keys(files).filter((path) => path.startsWith('.github/workflows/'))).toEqual([
-        previewWorkflowPath
-      ])
+      expect(
+        Object.keys(files)
+          .filter((path) => path.startsWith('.github/workflows/'))
+          .toSorted()
+      ).toEqual([previewWorkflowPath, stableWorkflow])
       const upstreamFilesAtRelease = upstreamFiles('escape-html', '1.0.3')
       expect(files['index.js']).toBe(upstreamFilesAtRelease['index.js'])
       expect(files.LICENSE).toBe(upstreamFilesAtRelease.LICENSE)
@@ -165,6 +198,52 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(publish?.steps.at(-1)?.run).toMatch(
         /^npx --yes pkg-pr-new@\d+\.\d+\.\d+ publish .*\.\/preview\/\*\.tgz$/
       )
+    })
+
+    it('adds a stable release workflow in which only the publish job can get an OIDC token', async () => {
+      const test = await setup()
+      seedUpstream(test.github, test.registry, escapeHtml)
+
+      await test.run()
+
+      const text = test.github.fileAt(fork, baseBranch, stableWorkflow) ?? ''
+      const workflow = parse(text) as Workflow
+      expect(workflow.on).toEqual({ push: { branches: ['ptg/base/**'] } })
+      expect(workflow.permissions).toEqual({})
+      expect(Object.keys(workflow.jobs)).toEqual(['gate', 'build', 'publish'])
+      const { gate, build, publish } = workflow.jobs
+      expect(gate?.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
+      expect(build?.permissions).toEqual({ contents: 'read' })
+      expect(publish?.permissions).toEqual({ 'id-token': 'write' })
+      expect(build?.needs).toBe('gate')
+      expect(publish?.needs).toEqual(['gate', 'build'])
+      for (const job of [gate, build, publish]) {
+        expect(job?.if).toContain("github.repository == 'patchtogo-ai/escape-html'")
+        expect(job?.if).toContain("startsWith(github.ref, 'refs/heads/ptg/base/')")
+      }
+      for (const job of [build, publish]) {
+        expect(job?.if).toContain("needs.gate.outputs.release == 'true'")
+      }
+      expect(build?.env).toMatchObject({
+        PTG_PACKAGE_NAME: '@patchtogo.ai/escape-html',
+        PTG_UPSTREAM_VERSION: '1.0.3',
+        PTG_PACKAGE_DIR: '.',
+        PTG_BEFORE: '2020-01-01T00:00:00.000Z'
+      })
+      for (const job of [gate, publish]) {
+        expect(job?.steps.some((step) => step.uses?.startsWith('actions/checkout@'))).toBe(false)
+      }
+      const command = publish?.steps.at(-1)?.run ?? ''
+      expect(command).toMatch(/^npm publish \.\/release\/\*\.tgz /)
+      for (const flag of ['--provenance', '--access public', '--tag latest', '--ignore-scripts']) {
+        expect(command).toContain(flag)
+      }
+      expect(text).not.toMatch(/secrets\.|NODE_AUTH_TOKEN|NPM_TOKEN|_authToken|pull_request_target/)
+      const actions = Object.values(workflow.jobs).flatMap((job) =>
+        job.steps.flatMap((step) => (step.uses ? [step.uses] : []))
+      )
+      expect(actions.length).toBeGreaterThan(0)
+      for (const action of actions) expect(action).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/)
     })
 
     it('names a scoped monorepo package after its scope and finds its package tag', async () => {
@@ -222,6 +301,11 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(workflow.jobs.build?.env).toMatchObject({
         PTG_PACKAGE_DIR: 'packages/strings',
         PTG_README: 'packages/strings/readme.markdown'
+      })
+      const stable = parse(test.github.fileAt(scoped, name, stableWorkflow) ?? '') as Workflow
+      expect(stable.jobs.build?.env).toMatchObject({
+        PTG_PACKAGE_NAME: '@patchtogo.ai/acme__strings',
+        PTG_PACKAGE_DIR: 'packages/strings'
       })
     })
 
@@ -424,37 +508,60 @@ describe.each(stores)('forking and the base branch on the %s store', (_name, cre
       expect(test.github.repository(fork)?.defaultBranch).toBe(baseBranch)
     })
 
-    it('adds the preview workflow to a base branch cut before it existed, in one follow-up commit', async () => {
-      const test = await setup()
-      seedUpstream(test.github, test.registry, escapeHtml)
-      test.github.failNext('setDefaultBranch')
-      const failed = await test.run()
-      const forked = test.github.repository(fork)
-      const scaffolded = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
-      const { [previewWorkflowPath]: workflow, ...older } = scaffolded?.files ?? {}
-      const before = await test.github.createBranch(fork, {
-        name: 'ptg/older-scaffolding',
-        parent: scaffolded?.sha ?? '',
-        message: 'a base branch scaffolded without the preview workflow',
-        changes: [{ path: previewWorkflowPath, delete: true }]
-      })
-      forked?.branches.set(baseBranch, before)
-      forked?.branches.delete('ptg/older-scaffolding')
+    it('adds missing workflows to an unprotected base branch in one follow-up commit', async () => {
+      const test = await olderBaseBranch()
+      test.github.rulesets = []
 
-      await test.pipeline.handle({ type: 'retry-requested', runId: failed?.id ?? '' })
+      await test.retry()
 
-      const run = await test.store.getRun(failed?.id ?? '')
-      const head = test.github.commits.get(forked?.branches.get(baseBranch) ?? '')
-      expect(run).toMatchObject({
+      const head = test.head()
+      expect(await test.run()).toMatchObject({
         state: 'fixing',
         baseBranch: { name: baseBranch, sha: head?.sha }
       })
-      expect(head?.parent).toBe(before)
+      expect(head?.parent).toBe(test.before)
       expect(head?.message).toMatch(
         /^chore: update the patchtogo scaffolding for escape-html@1\.0\.3\n/
       )
-      expect(head?.files).toEqual({ ...older, [previewWorkflowPath]: workflow })
+      expect(head?.files).toEqual({
+        ...test.older,
+        [previewWorkflowPath]: test.workflows.preview,
+        [stableWorkflow]: test.workflows.stable
+      })
       expect(test.builder.requests).toHaveLength(1)
+    })
+
+    it('proposes missing workflows for a protected base branch in a pull request and waits for it', async () => {
+      const test = await olderBaseBranch()
+
+      await test.retry()
+
+      const scaffoldingBranch = 'ptg/scaffolding/escape-html/1.0.3'
+      expect(test.github.pullRequests).toMatchObject([
+        { head: scaffoldingBranch, base: baseBranch, reviewTeams: ['reviewers'] }
+      ])
+      expect(await test.run()).toMatchObject({
+        state: 'failed',
+        failure: {
+          step: 'verifying',
+          error: expect.stringContaining(
+            'is protected, so patchtogo opened https://github.com/patchtogo-ai/escape-html/pull/1'
+          )
+        }
+      })
+      expect(test.head()?.sha).toBe(test.before)
+      expect(test.github.changedFiles(fork, baseBranch, scaffoldingBranch)).toEqual({
+        [previewWorkflowPath]: test.workflows.preview,
+        [stableWorkflow]: test.workflows.stable
+      })
+
+      const merged = test.github.mergePullRequest(fork, 1)
+      await test.retry()
+
+      expect(await test.run()).toMatchObject({
+        state: 'fixing',
+        baseBranch: { name: baseBranch, sha: merged }
+      })
     })
 
     it('shares one fork between packages from the same repository', async () => {

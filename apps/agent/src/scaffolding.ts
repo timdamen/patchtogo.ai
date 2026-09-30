@@ -3,6 +3,7 @@ import { patchedPackageName, patchedVersion } from './naming.ts'
 import type { UpstreamRelease } from './pipeline/patch-run.ts'
 import type { FileChange, RepoRef } from './pipeline/ports.ts'
 import { PREVIEW_WORKFLOW_FILE, previewWorkflow } from './preview-workflow.ts'
+import { STABLE_WORKFLOW_FILE, stableReleaseWorkflow } from './stable-workflow.ts'
 import { repoName } from './upstream.ts'
 
 export const NOTICE_FILE = 'PATCHTOGO.md'
@@ -39,6 +40,7 @@ export interface WorkflowInput {
   release: UpstreamRelease
   fork: RepoRef
   readmePath: string
+  patchedName: string
 }
 
 const readmePattern = /^readme(\.(md|markdown|txt))?$/i
@@ -137,7 +139,8 @@ export function packageFile(release: UpstreamRelease, file: string): string {
 export function scaffoldingWorkflows({
   release,
   fork,
-  readmePath
+  readmePath,
+  patchedName
 }: WorkflowInput): ScaffoldingFile[] {
   return [
     {
@@ -146,6 +149,16 @@ export function scaffoldingWorkflows({
         fork,
         directory: release.directory,
         readmePath,
+        publishedAt: release.publishedAt
+      })
+    },
+    {
+      path: STABLE_WORKFLOW_FILE,
+      content: stableReleaseWorkflow({
+        fork,
+        packageName: patchedName,
+        upstreamVersion: release.version,
+        directory: release.directory,
         publishedAt: release.publishedAt
       })
     }
@@ -185,7 +198,7 @@ export function scaffolding(input: ScaffoldingInput): Scaffolding {
   const readmePath = input.readme?.path ?? at('README.md')
   const markdown = isMarkdown(readmePath)
   const readme = `${banner(input, patchedName, markdown)}\n\n${input.readme?.text ?? `# ${patchedName}\n`}`
-  const workflows = scaffoldingWorkflows({ release, fork, readmePath })
+  const workflows = scaffoldingWorkflows({ release, fork, readmePath, patchedName })
   const managed = new Set(workflows.map((file) => file.path))
   const changes: FileChange[] = [
     { path: at('package.json'), content: packageJson },
@@ -203,7 +216,7 @@ export function scaffolding(input: ScaffoldingInput): Scaffolding {
   const message = [
     `chore: patchtogo scaffolding for ${packageName}@${release.version}`,
     '',
-    `Renames the package to ${patchedName} ${version}, points repository at the fork, adds the unofficial-fork banner, the attribution notice and CODEOWNERS for the reviewer team, and replaces the upstream workflows with the patchtogo preview workflow.`,
+    `Renames the package to ${patchedName} ${version}, points repository at the fork, adds the unofficial-fork banner, the attribution notice and CODEOWNERS for the reviewer team, and replaces the upstream workflows with the patchtogo preview and stable release workflows.`,
     '',
     `Patchtogo-Upstream: ${repoName(release.repository)}@${release.commit.sha}`
   ].join('\n')

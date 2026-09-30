@@ -37,3 +37,7 @@ export function releaseRefs(packageName: string, version: string): string[] {
 export function repoName({ owner, repo }: RepoRef): string {
   return `${owner}/${repo}`
 }
+
+export function sameRepository(a: RepoRef, b: RepoRef): boolean {
+  return repoName(a).toLowerCase() === repoName(b).toLowerCase()
+}

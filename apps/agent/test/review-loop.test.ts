@@ -24,6 +24,7 @@ import {
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
 import { BOT_LOGIN } from './fakes/github.ts'
+import { inlineQueue } from './fakes/pipeline.ts'
 import { stores } from './support/stores.ts'
 
 const org = 'patchtogo-ai'
@@ -429,11 +430,7 @@ describe.each(stores)('the review loop on the %s store', (_name, createStore) =>
       expect(test.fixer.requests).toHaveLength(1)
       expect(test.github.comments).toEqual([])
 
-      const queue = {
-        send: (event: PipelineEvent) => test.pipeline.handle(event),
-        retryFailedJobs: async () => 0,
-        failedKeys: async () => []
-      }
+      const queue = inlineQueue(test.pipeline)
       expect(await requestRetry(ghsaId, { store: test.store, queue })).toEqual({
         retriedJobs: 0,
         retriedRuns: [runId]

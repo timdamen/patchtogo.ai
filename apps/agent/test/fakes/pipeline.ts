@@ -2,7 +2,12 @@ import type { Advisory } from '../../src/advisory.ts'
 import type { Classification } from '../../src/comment-classification.ts'
 import { InMemoryStore } from '../../src/pipeline/memory-store.ts'
 import type { Automation } from '../../src/pipeline/automation.ts'
-import { createPipeline, type PipelineSettings } from '../../src/pipeline/pipeline.ts'
+import type { PipelineEvent } from '../../src/pipeline/events.ts'
+import {
+  createPipeline,
+  type Pipeline,
+  type PipelineSettings
+} from '../../src/pipeline/pipeline.ts'
 import type { FixResult, Store } from '../../src/pipeline/ports.ts'
 import { withTestAdvisories } from '../../src/test-advisories.ts'
 import type { Triage } from '../../src/triage.ts'
@@ -73,5 +78,13 @@ export function createTestPipeline({
         automation: level,
         automationPackages: packages
       })
+  }
+}
+
+export function inlineQueue(pipeline: Pipeline) {
+  return {
+    send: (event: PipelineEvent) => pipeline.handle(event),
+    retryFailedJobs: async () => 0,
+    failedKeys: async (): Promise<string[]> => []
   }
 }

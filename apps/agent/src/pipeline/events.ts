@@ -9,6 +9,7 @@ export interface AdvisoryPublished {
 export interface RetryRequested {
   type: 'retry-requested'
   runId: string
+  fromNeedsHuman?: boolean
 }
 
 export interface PatchPullRequestRef {

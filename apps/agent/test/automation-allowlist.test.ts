@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { listFailures, requestRetry } from '../src/operator.ts'
-import type { PipelineEvent } from '../src/pipeline/events.ts'
-import type { Pipeline } from '../src/pipeline/pipeline.ts'
 import {
   advisory,
   fixResult,
@@ -9,18 +7,11 @@ import {
   runId as listedRunId,
   setupPatchRun
 } from './fakes/escape-html-fix.ts'
+import { inlineQueue } from './fakes/pipeline.ts'
 import { seedUpstream } from './fakes/upstream.ts'
 import { stores } from './support/stores.ts'
 
 const unlistedRunId = `${ghsaId}:html-escaper`
-
-function queueFor(pipeline: Pipeline) {
-  return {
-    send: (event: PipelineEvent) => pipeline.handle(event),
-    retryFailedJobs: async () => 0,
-    failedKeys: async () => []
-  }
-}
 
 describe.each(stores)('the automation allowlist on the %s store', (_name, createStore) => {
   async function setup() {
@@ -60,7 +51,7 @@ describe.each(stores)('the automation allowlist on the %s store', (_name, create
     expect(test.fixer.requests.map((request) => request.runId)).toEqual([listedRunId])
     const { held: listed } = await listFailures({
       store: test.store,
-      queue: queueFor(test.pipeline)
+      queue: inlineQueue(test.pipeline)
     })
     expect(listed.map((run) => run.id)).toEqual([unlistedRunId])
   })
@@ -71,7 +62,7 @@ describe.each(stores)('the automation allowlist on the %s store', (_name, create
 
     const report = await requestRetry(unlistedRunId, {
       store: test.store,
-      queue: queueFor(widened)
+      queue: inlineQueue(widened)
     })
 
     expect(report.retriedRuns).toEqual([unlistedRunId])

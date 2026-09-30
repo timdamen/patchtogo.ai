@@ -27,7 +27,7 @@ gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
   "enforcement": "active",
   "bypass_actors": [],
   "conditions": {
-    "ref_name": { "include": ["refs/heads/ptg/base/**"], "exclude": [] },
+    "ref_name": { "include": ["refs/heads/ptg/base/**/*"], "exclude": [] },
     "repository_name": { "include": ["~ALL"], "exclude": [] }
   },
   "rules": [
@@ -71,7 +71,7 @@ The stable release workflow publishes from the `patchtogo-release` deployment en
 
 Without the environment, the workflow file on any branch of a fork could ask for an OIDC token that npm accepts: the reviewer team has write access, so one reviewer could push a branch that publishes with provenance and skip the two approvals. With it, only a run on a base branch reaches npm, and base branches change only through reviewed pull requests.
 
-A base branch can still be created by anyone with write access. To close that too, add a second organisation ruleset for `refs/heads/ptg/base/**` with only the `creation` rule and the patchtogo GitHub App as its one bypass actor, so only the App can create base branches. Keep it separate from the pull request ruleset, which must stay without bypass actors.
+A base branch can still be created by anyone with write access. To close that too, add a second organisation ruleset for `refs/heads/ptg/base/**/*` with only the `creation` rule and the patchtogo GitHub App as its one bypass actor, so only the App can create base branches. Keep it separate from the pull request ruleset, which must stay without bypass actors.
 
 ```sh
 gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
@@ -80,7 +80,7 @@ gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
   "target": "branch",
   "enforcement": "active",
   "conditions": {
-    "ref_name": { "include": ["refs/heads/ptg/base/**"], "exclude": [] },
+    "ref_name": { "include": ["refs/heads/ptg/base/**/*"], "exclude": [] },
     "repository_name": { "include": ["~ALL"], "exclude": [] }
   },
   "bypass_actors": [
@@ -91,7 +91,7 @@ gh api -X POST orgs/patchtogo-ai/rulesets --input - <<'JSON'
 JSON
 ```
 
-Organisation rulesets need the GitHub Team plan (or higher), and the `gh` token needs the `admin:org` scope (`gh auth refresh -h github.com -s admin:org`).
+Ruleset branch patterns are not Actions branch filters: a trailing `**` matches only one path segment, so `refs/heads/ptg/base/**` would miss every `ptg/base/<slug>/<version>` branch. Use `refs/heads/ptg/base/**/*`, and confirm with `gh api repos/patchtogo-ai/<fork>/rules/branches/ptg/base/<slug>/<version>`, which must list the `pull_request` rule. Organisation rulesets need the GitHub Team plan (or higher), and the `gh` token needs the `admin:org` scope (`gh auth refresh -h github.com -s admin:org`).
 
 ### GitHub App
 

@@ -52,7 +52,7 @@ export default defineRailway(() => {
       PTG_REVIEWER_TEAM: 'reviewers',
       PTG_REQUIRED_APPROVALS: '1',
       PTG_AUTOMATION: 'full',
-      PTG_AUTOMATION_PACKAGES: 'escape-html',
+      PTG_AUTOMATION_PACKAGES: 'escape-html,decompress',
       PTG_MODEL_PROXY_URL: 'https://agent.patchtogo.ai/model-proxy',
       PORT: preserve(),
       GITHUB_APP_PRIVATE_KEY_PATH: preserve(),

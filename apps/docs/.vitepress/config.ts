@@ -3,9 +3,11 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'patchtogo',
   description: 'Fast, reviewable security patches for npm packages that are stuck on a CVE.',
+  head: [['link', { rel: 'icon', href: '/favicon.ico', sizes: 'any' }]],
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
+    logo: { light: '/logo.svg', dark: '/logo-dark.svg', alt: 'patchtogo' },
     nav: [
       { text: 'Why', link: '/why-patchtogo' },
       { text: 'How it works', link: '/how-it-works' }

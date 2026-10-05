@@ -3,7 +3,26 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'patchtogo',
   description: 'Fast, reviewable security patches for npm packages that are stuck on a CVE.',
-  head: [['link', { rel: 'icon', href: '/favicon.ico', sizes: 'any' }]],
+  head: [
+    [
+      'link',
+      {
+        rel: 'icon',
+        href: '/favicon-dark.ico',
+        sizes: 'any',
+        media: '(prefers-color-scheme: dark)'
+      }
+    ],
+    [
+      'link',
+      {
+        rel: 'icon',
+        href: '/favicon.ico',
+        sizes: 'any',
+        media: '(prefers-color-scheme: light)'
+      }
+    ]
+  ],
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {

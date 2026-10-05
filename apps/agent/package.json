@@ -6,6 +6,7 @@
     "dev": "node --watch --env-file-if-exists=.env src/main.ts",
     "start": "node src/main.ts",
     "triage": "node --env-file-if-exists=.env src/triage-cli.ts",
+    "scan": "node --env-file-if-exists=.env src/scan-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

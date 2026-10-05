@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { toNpmAdvisories } from '../src/github-advisories.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchWatchedAdvisories, toNpmAdvisories } from '../src/github-advisories.ts'
 
 const raw = {
   ghsa_id: 'GHSA-p6mc-m468-83gw',
@@ -36,5 +36,30 @@ describe('toNpmAdvisories', () => {
 
   it('drops advisories without a known severity', () => {
     expect(toNpmAdvisories({ ...raw, severity: 'unknown' })).toEqual([])
+  })
+})
+
+describe('fetchWatchedAdvisories', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('asks GitHub for the package and keeps only its entries', async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json([raw]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const advisories = await fetchWatchedAdvisories('lodash.set')
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('affects=lodash.set')
+    expect(advisories.map((a) => a.packageName)).toEqual(['lodash.set'])
+  })
+
+  it('throws on a failed request', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 503 }))
+    )
+
+    await expect(fetchWatchedAdvisories('zod')).rejects.toThrow('HTTP 503')
   })
 })

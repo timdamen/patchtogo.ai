@@ -42,3 +42,13 @@ export async function fetchNpmAdvisories(ghsaId: string): Promise<Advisory[]> {
   if (!response.ok) throw new Error(`GitHub advisory ${ghsaId}: HTTP ${response.status}`)
   return toNpmAdvisories(await response.json())
 }
+
+export async function fetchWatchedAdvisories(packageName: string): Promise<Advisory[]> {
+  const query = new URLSearchParams({ ecosystem: 'npm', affects: packageName, per_page: '100' })
+  const response = await fetch(`https://api.github.com/advisories?${query}`, {
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
+  })
+  if (!response.ok) throw new Error(`GitHub advisories for ${packageName}: HTTP ${response.status}`)
+  const raw = z.array(z.unknown()).parse(await response.json())
+  return raw.flatMap(toNpmAdvisories).filter((a) => a.packageName === packageName)
+}

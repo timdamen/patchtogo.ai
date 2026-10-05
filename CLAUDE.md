@@ -15,6 +15,7 @@ patchtogo forks npm packages that have an unpatched CVE, fixes them in a public 
 
 - `pnpm dev`: the agent server with watch mode.
 - `pnpm --filter agent triage <GHSA-id> [package]`: triage a real advisory with the configured model.
+- `pnpm --filter agent scan`: fetch the GitHub advisories for every package in `apps/agent/src/watchlist.ts` and triage each one.
 - `pnpm docs:dev`, `pnpm docs:build`: the docs site.
 - `pnpm build`, `pnpm typecheck`, `pnpm test`: every workspace package.
 - `pnpm lint`, `pnpm fmt`, `pnpm fmt:check`, `pnpm knip`, `pnpm check:comments`: the quality checks, repo-wide.

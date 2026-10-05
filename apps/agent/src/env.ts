@@ -1,13 +1,106 @@
 import { z } from 'zod'
+import { automationLevels } from './pipeline/automation.ts'
 
 export const aiEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_WORKSPACE_ID: z.string().min(1).optional(),
   PTG_MODEL: z.string().min(1).default('claude-opus-5-5')
 })
 
-export const serverEnvSchema = z.object({
-  PORT: z.coerce.number().int().positive().default(3000),
-  GITHUB_WEBHOOK_SECRET: z.string().min(1)
+const optionalString = z
+  .string()
+  .optional()
+  .transform((value) => value || undefined)
+
+const optionalMegabytes = optionalString.pipe(
+  z.coerce.number<string | undefined>().positive().optional()
+)
+
+export const databaseEnvSchema = z.object({
+  DATABASE_URL: z.string().min(1)
 })
 
+export const serverEnvSchema = databaseEnvSchema.extend({
+  PORT: z.coerce.number().int().positive().default(3000),
+  GITHUB_WEBHOOK_SECRET: z.string().min(1),
+  PTG_RUN_TOKEN_SECRET: z.string().min(32),
+  GITHUB_TOKEN: optionalString,
+  DISCORD_WEBHOOK_URL: optionalString.pipe(z.url().optional()),
+  PTG_POLL_INTERVAL_MINUTES: z.coerce.number().positive().default(15),
+  PTG_POLL_LOOKBACK_HOURS: z.coerce.number().nonnegative().default(24),
+  PTG_MAX_CONCURRENT_RUNS: z.coerce.number().int().positive().default(2),
+  PTG_JOB_TIMEOUT_MINUTES: z.coerce.number().positive().default(60),
+  PTG_WEBHOOK_MAX_MB: optionalMegabytes,
+  PTG_MODEL_PROXY_MAX_MB: optionalMegabytes
+})
+
+export const pipelineEnvSchema = z.object({
+  PTG_FORK_ORG: z.string().min(1).default('patchtogo-ai'),
+  PTG_NPM_SCOPE: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._-]*$/)
+    .default('patchtogo.ai'),
+  PTG_REVIEWER_TEAM: z.string().min(1).default('reviewers'),
+  PTG_REQUIRED_APPROVALS: z.coerce.number().int().min(1).default(2),
+  PTG_AUTOMATION: z.enum(automationLevels).default('triage-only'),
+  PTG_AUTOMATION_PACKAGES: z
+    .string()
+    .optional()
+    .transform((text) => [
+      ...new Set(
+        (text ?? '')
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean)
+      )
+    ]),
+  PTG_UPSTREAM_TOKEN: optionalString
+})
+
+export const githubAppEnvSchema = z
+  .object({
+    GITHUB_APP_ID: z.string().min(1),
+    GITHUB_APP_INSTALLATION_ID: optionalString.pipe(
+      z.coerce.number<string | undefined>().int().positive().optional()
+    ),
+    GITHUB_APP_PRIVATE_KEY: optionalString,
+    GITHUB_APP_PRIVATE_KEY_PATH: optionalString
+  })
+  .refine(
+    (env) =>
+      env.GITHUB_APP_PRIVATE_KEY !== undefined || env.GITHUB_APP_PRIVATE_KEY_PATH !== undefined,
+    'set GITHUB_APP_PRIVATE_KEY (the PEM contents) or GITHUB_APP_PRIVATE_KEY_PATH'
+  )
+
+const optionalModel = z.string().min(1).optional()
+
+export const fixerEnvSchema = z
+  .object({
+    PTG_MODEL: z.string().min(1).default('claude-opus-5-5'),
+    PTG_MODEL_PROXY_URL: z.url().optional(),
+    PTG_MODEL_SMALL: optionalModel,
+    PTG_MODEL_INVESTIGATOR: optionalModel,
+    PTG_MODEL_EXPLOIT_TEST_WRITER: optionalModel,
+    PTG_MODEL_PATCH_WRITER: optionalModel,
+    PTG_MODEL_VERIFIER: optionalModel,
+    PTG_MODEL_DIFF_REVIEWER: optionalModel,
+    PTG_FIXER_MAX_TURNS: z.coerce.number().int().positive().default(80),
+    PTG_FIXER_MAX_BUDGET_USD: z.coerce.number().positive().default(10),
+    PTG_FIXER_TEST_TIMEOUT_MINUTES: z.coerce.number().positive().default(5),
+    PTG_FIXER_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(40),
+    VERCEL_TOKEN: z.string().min(1).optional(),
+    VERCEL_TEAM_ID: z.string().min(1).optional(),
+    VERCEL_PROJECT_ID: z.string().min(1).optional()
+  })
+  .refine(
+    (env) =>
+      [env.VERCEL_TOKEN, env.VERCEL_TEAM_ID, env.VERCEL_PROJECT_ID].every((v) => v === undefined) ||
+      [env.VERCEL_TOKEN, env.VERCEL_TEAM_ID, env.VERCEL_PROJECT_ID].every((v) => v !== undefined),
+    'set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID together, or none of them to use VERCEL_OIDC_TOKEN'
+  )
+
 export type AiEnv = z.infer<typeof aiEnvSchema>
+
+export type FixerEnv = z.infer<typeof fixerEnvSchema>
+
+export type GitHubAppEnv = z.infer<typeof githubAppEnvSchema>

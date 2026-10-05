@@ -3,7 +3,7 @@
   "ignoreExportsUsedInFile": true,
   "workspaces": {
     ".": {
-      "entry": ["lefthook.yml", "scripts/*.mjs"]
+      "entry": ["lefthook.yml", "scripts/*.mjs", ".railway/railway.ts"]
     },
     "apps/agent": {},
     "apps/docs": {}

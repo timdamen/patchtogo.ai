@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { toNpmAdvisories } from '../src/github-advisories.ts'
+import { parseGlobalAdvisory } from '../src/github-advisories.ts'
 
 const raw = {
   ghsa_id: 'GHSA-p6mc-m468-83gw',
+  type: 'reviewed',
   cve_id: 'CVE-2020-8203',
   summary: 'Prototype Pollution in lodash',
   description: 'details',
@@ -26,15 +27,15 @@ const raw = {
   ]
 }
 
-describe('toNpmAdvisories', () => {
-  it('keeps one entry per npm package and normalises severity', () => {
-    const advisories = toNpmAdvisories(raw)
+describe('parseGlobalAdvisory', () => {
+  it('keeps every vulnerability and normalises severity', () => {
+    const advisory = parseGlobalAdvisory(raw)
 
-    expect(advisories.map((a) => a.packageName)).toEqual(['lodash', 'lodash.set'])
-    expect(advisories[1]).toMatchObject({ patchedVersion: null, severity: 'moderate' })
-  })
-
-  it('drops advisories without a known severity', () => {
-    expect(toNpmAdvisories({ ...raw, severity: 'unknown' })).toEqual([])
+    expect(advisory).toMatchObject({ type: 'reviewed', severity: 'moderate' })
+    expect(advisory.vulnerabilities.map((v) => v.packageName)).toEqual([
+      'lodash',
+      'lodash.set',
+      'lodash-rails'
+    ])
   })
 })

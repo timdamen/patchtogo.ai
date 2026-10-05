@@ -17,5 +17,7 @@
     "**/.vitepress/cache/",
     "**/.vitepress/dist/"
   ],
-  "rules": {}
+  "rules": {
+    "import/no-unassigned-import": ["warn", { "allow": ["**/*.css"] }]
+  }
 }
